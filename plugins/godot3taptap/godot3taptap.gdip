@@ -1,0 +1,32 @@
+[config]
+name="TapTapLogin"
+binary="godot3taptap.xcframework"
+
+initialization="register_taptaplogin_types"
+deinitialization="unregister_taptaplogin_types"
+
+[dependencies]
+linked=[]
+embedded=[
+    "sdk/THEMISLite.xcframework",
+    "sdk/TapTapBasicToolsSDK.xcframework",
+    "sdk/TapTapCoreSDK.xcframework",
+    "sdk/TapTapGidSDK.xcframework",
+    "sdk/TapTapNetworkSDK.xcframework",
+    "sdk/tapsdkcorecpp.xcframework",
+    "sdk/TapTapSDKBridgeCore.xcframework",
+    "sdk/TapTapLoginSDK.xcframework",
+    "sdk/TapTapLoginResource.bundle",
+    "sdk/TapTapComplianceSDK.xcframework",
+    "sdk/TapTapComplianceResource.bundle"
+]
+system=[]
+
+capabilities=[]
+
+files=[]
+
+[plist]
+# TapTap SDK configuration can be added here if needed
+# Example:
+# NSAppTransportSecurity/NSAllowsArbitraryLoads=true
