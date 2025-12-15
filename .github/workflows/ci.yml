@@ -27,6 +27,9 @@ jobs:
       - name: Make scripts executable
         run: chmod +x ./scripts/*.sh
 
+      - name: Ensure bin directory exists
+        run: mkdir -p bin
+
       - name: Generate Headers
         run: |
           ./scripts/generate_headers.sh 3.x || true
