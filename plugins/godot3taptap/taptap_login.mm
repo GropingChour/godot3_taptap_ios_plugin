@@ -222,7 +222,7 @@ void TapTapLogin::compliance() {
 	
 	// Simulate compliance success
 	dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.3 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-		emit_signal(\"onComplianceResult\", 500, \"LOGIN_SUCCESS\");
+		emit_signal("onComplianceResult", 500, "LOGIN_SUCCESS");
 	});
 }
 
@@ -235,7 +235,7 @@ void TapTapLogin::checkLicense(bool p_force_check) {
 	
 	// Simulate license check
 	dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-		emit_signal(\"onLicenseSuccess\");
+		emit_signal("onLicenseSuccess");
 	});
 }
 
@@ -255,15 +255,15 @@ void TapTapLogin::queryDLC(const Array &p_sku_ids) {
 	
 	// Simulate query result
 	Dictionary result;
-	result[\"code\"] = 0;
-	result[\"codeName\"] = \"QUERY_RESULT_OK\";
+	result["code"] = 0;
+	result["codeName"] = "QUERY_RESULT_OK";
 	Dictionary query_list;
 	for (int i = 0; i < p_sku_ids.size(); i++) {
 		query_list[p_sku_ids[i]] = 0; // 0 = not purchased
 	}
-	result[\"queryList\"] = query_list;
+	result["queryList"] = query_list;
 	
-	emit_signal(\"onDLCQueryResult\", JSON::print(result));
+	emit_signal("onDLCQueryResult", JSON::print(result));
 }
 
 void TapTapLogin::purchaseDLC(const String &p_sku_id) {
@@ -273,7 +273,7 @@ void TapTapLogin::purchaseDLC(const String &p_sku_id) {
 	// [TapTapLicense purchaseDLC:skuId callback:^(NSString *sku, TapLicensePurchaseCode status) { ... }];
 	
 	// Simulate purchase (DLC_NOT_PURCHASED = 0, DLC_PURCHASED = 1, DLC_RETURN_ERROR = -1)
-	emit_signal(\"onDLCPurchaseResult\", p_sku_id, 0);
+	emit_signal("onDLCPurchaseResult", p_sku_id, 0);
 }
 
 // IAP (In-App Purchase)
@@ -285,32 +285,32 @@ void TapTapLogin::queryProductDetailsAsync(const Array &p_products) {
 	// Log and skip
 	
 	Dictionary result;
-	result[\"error\"] = \"IAP not supported on iOS\";
-	emit_signal(\"onProductDetailsResponse\", JSON::print(result));
+	result["error"] = "IAP not supported on iOS";
+	emit_signal("onProductDetailsResponse", JSON::print(result));
 }
 
 void TapTapLogin::launchBillingFlow(const String &p_product_id, const String &p_obfuscated_account_id) {
 	NSLog(@"[TapTap] launchBillingFlow called (not supported on iOS)");
 	
 	Dictionary result;
-	result[\"error\"] = \"IAP not supported on iOS\";
-	emit_signal(\"onLaunchBillingFlowResult\", JSON::print(result));
+	result["error"] = "IAP not supported on iOS";
+	emit_signal("onLaunchBillingFlowResult", JSON::print(result));
 }
 
 void TapTapLogin::finishPurchaseAsync(const String &p_order_id, const String &p_purchase_token) {
 	NSLog(@"[TapTap] finishPurchaseAsync called (not supported on iOS)");
 	
 	Dictionary result;
-	result[\"error\"] = \"IAP not supported on iOS\";
-	emit_signal(\"onFinishPurchaseResponse\", JSON::print(result));
+	result["error"] = "IAP not supported on iOS";
+	emit_signal("onFinishPurchaseResponse", JSON::print(result));
 }
 
 void TapTapLogin::queryUnfinishedPurchaseAsync() {
 	NSLog(@"[TapTap] queryUnfinishedPurchaseAsync called (not supported on iOS)");
 	
 	Dictionary result;
-	result[\"error\"] = \"IAP not supported on iOS\";
-	emit_signal(\"onQueryUnfinishedPurchaseResponse\", JSON::print(result));
+	result["error"] = "IAP not supported on iOS";
+	emit_signal("onQueryUnfinishedPurchaseResponse", JSON::print(result));
 }
 
 // Utility
