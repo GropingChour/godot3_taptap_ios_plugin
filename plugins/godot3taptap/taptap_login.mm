@@ -123,8 +123,8 @@ void TapTapLogin::initSdk(const String &p_client_id, const String &p_client_toke
 	client_token = p_client_token;
 	sdk_initialized = true;
 	
-	NSLog(@\"[TapTap] initSdk called with clientId: %s, enableLog: %d, withIAP: %d\", 
-		p_client_id.utf8().get_data(), p_enable_log, p_with_iap);
+	NSLog(@"[TapTap] initSdk called with clientId: %@, enableLog: %d, withIAP: %d", 
+		[NSString stringWithUTF8String:p_client_id.utf8().get_data()], p_enable_log, p_with_iap);
 	
 	// TODO: Initialize real TapTap SDK here
 	// [TapTapSDK initWithConfig:config];
@@ -137,7 +137,7 @@ void TapTapLogin::initSdkWithEncryptedToken(const String &p_client_id, const Str
 	client_id = p_client_id;
 	sdk_initialized = true;
 	
-	NSLog(@\"[TapTap] initSdkWithEncryptedToken called with clientId: %s\", p_client_id.utf8().get_data());
+	NSLog(@"[TapTap] initSdkWithEncryptedToken called with clientId: %@", [NSString stringWithUTF8String:p_client_id.utf8().get_data()]);
 	
 	// TODO: Decrypt token and initialize SDK
 	// String decrypted_token = decrypt(p_encrypted_token);
@@ -149,17 +149,17 @@ void TapTapLogin::initSdkWithEncryptedToken(const String &p_client_id, const Str
 
 // Login
 void TapTapLogin::login(bool p_use_profile, bool p_use_friends) {
-	NSLog(@\"[TapTap] login called with useProfile: %d, useFriends: %d\", p_use_profile, p_use_friends);
+	NSLog(@"[TapTap] login called with useProfile: %d, useFriends: %d", p_use_profile, p_use_friends);
 	
 	// Build scopes array
 	NSMutableArray *scopes = [NSMutableArray array];
 	if (p_use_profile) {
-		[scopes addObject:@\"public_profile\"];
+		[scopes addObject:@"public_profile"];
 	} else {
-		[scopes addObject:@\"basic_info\"];
+		[scopes addObject:@"basic_info"];
 	}
 	if (p_use_friends) {
-		[scopes addObject:@\"user_friends\"];
+		[scopes addObject:@"user_friends"];
 	}
 	
 	// TODO: Call real TapTap SDK login
@@ -175,12 +175,12 @@ void TapTapLogin::login(bool p_use_profile, bool p_use_friends) {
 bool TapTapLogin::isLogin() {
 	// TODO: Check real TapTap SDK login status
 	// return [TapTapLogin isLoggedIn];
-	NSLog(@\"[TapTap] isLogin called\");
+	NSLog(@"[TapTap] isLogin called");
 	return false;
 }
 
 String TapTapLogin::getUserProfile() {
-	NSLog(@\"[TapTap] getUserProfile called\");
+	NSLog(@"[TapTap] getUserProfile called");
 	
 	// TODO: Get real user profile from TapTap SDK
 	// TapTapAccount *account = [TapTapLogin getCurrentAccount];
@@ -197,7 +197,7 @@ String TapTapLogin::getUserProfile() {
 }
 
 void TapTapLogin::logout() {
-	NSLog(@\"[TapTap] logout called\");
+	NSLog(@"[TapTap] logout called");
 	
 	// TODO: Call real TapTap SDK logout
 	// [TapTapLogin logout];
@@ -207,7 +207,7 @@ void TapTapLogin::logout() {
 }
 
 void TapTapLogin::logoutThenRestart() {
-	NSLog(@\"[TapTap] logoutThenRestart called\");
+	NSLog(@"[TapTap] logoutThenRestart called");
 	logout();
 	// TODO: Restart app logic
 	// exit(0); // Not recommended, find proper iOS restart method
@@ -215,7 +215,7 @@ void TapTapLogin::logoutThenRestart() {
 
 // Compliance (Anti-addiction)
 void TapTapLogin::compliance() {
-	NSLog(@\"[TapTap] compliance called\");
+	NSLog(@"[TapTap] compliance called");
 	
 	// TODO: Start compliance check
 	// [TapTapCompliance startup:userId callback:^(int code, NSString *message) { ... }];
@@ -228,7 +228,7 @@ void TapTapLogin::compliance() {
 
 // License Verification
 void TapTapLogin::checkLicense(bool p_force_check) {
-	NSLog(@\"[TapTap] checkLicense called with forceCheck: %d\", p_force_check);
+	NSLog(@"[TapTap] checkLicense called with forceCheck: %d", p_force_check);
 	
 	// TODO: Call real TapTap SDK license check
 	// [TapTapLicense checkLicense:p_force_check callback:^(BOOL success) { ... }];
@@ -241,7 +241,7 @@ void TapTapLogin::checkLicense(bool p_force_check) {
 
 // DLC
 void TapTapLogin::queryDLC(const Array &p_sku_ids) {
-	NSLog(@\"[TapTap] queryDLC called with %d SKUs\", p_sku_ids.size());
+	NSLog(@"[TapTap] queryDLC called with %d SKUs", p_sku_ids.size());
 	
 	// Convert Array to NSArray
 	NSMutableArray *skuIds = [NSMutableArray array];
@@ -267,7 +267,7 @@ void TapTapLogin::queryDLC(const Array &p_sku_ids) {
 }
 
 void TapTapLogin::purchaseDLC(const String &p_sku_id) {
-	NSLog(@\"[TapTap] purchaseDLC called with SKU: %s\", p_sku_id.utf8().get_data());
+	NSLog(@"[TapTap] purchaseDLC called with SKU: %@", [NSString stringWithUTF8String:p_sku_id.utf8().get_data()]);
 	
 	// TODO: Call real TapTap SDK DLC purchase
 	// [TapTapLicense purchaseDLC:skuId callback:^(NSString *sku, TapLicensePurchaseCode status) { ... }];
@@ -278,7 +278,7 @@ void TapTapLogin::purchaseDLC(const String &p_sku_id) {
 
 // IAP (In-App Purchase)
 void TapTapLogin::queryProductDetailsAsync(const Array &p_products) {
-	NSLog(@\"[TapTap] queryProductDetailsAsync called with %d products\", p_products.size());
+	NSLog(@"[TapTap] queryProductDetailsAsync called with %d products", p_products.size());
 	
 	// TODO: Query product details
 	// iOS doesn't have IAP in TapTap SDK (Android only feature)
@@ -290,7 +290,7 @@ void TapTapLogin::queryProductDetailsAsync(const Array &p_products) {
 }
 
 void TapTapLogin::launchBillingFlow(const String &p_product_id, const String &p_obfuscated_account_id) {
-	NSLog(@\"[TapTap] launchBillingFlow called (not supported on iOS)\");
+	NSLog(@"[TapTap] launchBillingFlow called (not supported on iOS)");
 	
 	Dictionary result;
 	result[\"error\"] = \"IAP not supported on iOS\";
@@ -298,7 +298,7 @@ void TapTapLogin::launchBillingFlow(const String &p_product_id, const String &p_
 }
 
 void TapTapLogin::finishPurchaseAsync(const String &p_order_id, const String &p_purchase_token) {
-	NSLog(@\"[TapTap] finishPurchaseAsync called (not supported on iOS)\");
+	NSLog(@"[TapTap] finishPurchaseAsync called (not supported on iOS)");
 	
 	Dictionary result;
 	result[\"error\"] = \"IAP not supported on iOS\";
@@ -306,7 +306,7 @@ void TapTapLogin::finishPurchaseAsync(const String &p_order_id, const String &p_
 }
 
 void TapTapLogin::queryUnfinishedPurchaseAsync() {
-	NSLog(@\"[TapTap] queryUnfinishedPurchaseAsync called (not supported on iOS)\");
+	NSLog(@"[TapTap] queryUnfinishedPurchaseAsync called (not supported on iOS)");
 	
 	Dictionary result;
 	result[\"error\"] = \"IAP not supported on iOS\";
@@ -315,14 +315,14 @@ void TapTapLogin::queryUnfinishedPurchaseAsync() {
 
 // Utility
 void TapTapLogin::showTip(const String &p_text) {
-	NSLog(@\"[TapTap] showTip: %s\", p_text.utf8().get_data());
+	NSLog(@"[TapTap] showTip: %@", [NSString stringWithUTF8String:p_text.utf8().get_data()]);
 	
 	// TODO: Show native iOS toast/alert
 	// On iOS, you might want to use UIAlertController or a custom toast view
 }
 
 void TapTapLogin::restartApp() {
-	NSLog(@\"[TapTap] restartApp called\");
+	NSLog(@"[TapTap] restartApp called");
 	
 	// TODO: Implement app restart on iOS
 	// iOS doesn't have a direct restart API, might need to exit and let user reopen
@@ -347,10 +347,10 @@ TapTapLogin::TapTapLogin() {
 	ERR_FAIL_COND(instance != NULL);
 	instance = this;
 	sdk_initialized = false;
-	NSLog(@\"[TapTap] TapTapLogin singleton created\");
+	NSLog(@"[TapTap] TapTapLogin singleton created");
 }
 
 TapTapLogin::~TapTapLogin() {
 	instance = NULL;
-	NSLog(@\"[TapTap] TapTapLogin singleton destroyed\");
+	NSLog(@"[TapTap] TapTapLogin singleton destroyed");
 }
