@@ -1,5 +1,5 @@
 /*************************************************************************/
-/*  godot3taptap_module.h                                                */
+/*  godot3_taptap_module.cpp                                             */
 /*************************************************************************/
 /*                       This file is part of:                           */
 /*                           GODOT ENGINE                                */
@@ -28,5 +28,27 @@
 /* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                */
 /*************************************************************************/
 
-void register_godot3taptap_types();
-void unregister_godot3taptap_types();
+#include "godot3_taptap_module.h"
+
+#include "core/version.h"
+
+#if VERSION_MAJOR == 4
+#include "core/config/engine.h"
+#else
+#include "core/engine.h"
+#endif
+
+#include "godot3_taptap.h"
+
+Godot3TapTap *godot3_taptap;
+
+void register_godot3_taptap_types() {
+	godot3_taptap = memnew(Godot3TapTap);
+	Engine::get_singleton()->add_singleton(Engine::Singleton("Godot3TapTap", godot3_taptap));
+}
+
+void unregister_godot3_taptap_types() {
+	if (godot3_taptap) {
+		memdelete(godot3_taptap);
+	}
+}

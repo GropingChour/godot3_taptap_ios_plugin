@@ -3,9 +3,9 @@ set -e
 
 if [[ "$1" == "3.x" ]];
 then
-    GODOT_PLUGINS="godot3taptap"
+    GODOT_PLUGINS="godot3_taptap"
 else
-    GODOT_PLUGINS="godot3taptap"
+    GODOT_PLUGINS="godot3_taptap"
 fi
 
 # Compile Plugin

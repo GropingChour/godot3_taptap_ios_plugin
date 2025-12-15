@@ -1,5 +1,5 @@
 /*************************************************************************/
-/*  godot3taptap.mm                                                      */
+/*  godot3_taptap.mm                                                     */
 /*************************************************************************/
 /*                       This file is part of:                           */
 /*                           GODOT ENGINE                                */
@@ -28,7 +28,7 @@
 /* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                */
 /*************************************************************************/
 
-#include "godot3taptap.h"
+#include "godot3_taptap.h"
 
 #if VERSION_MAJOR == 4
 #import "platform/ios/app_delegate.h"
@@ -61,6 +61,8 @@ typedef PoolStringArray GodotStringArray;
 @property(nonatomic, strong) NSString *clientToken;
 @property(nonatomic, assign) BOOL sdkInitialized;
 
+- (NSString *)getDecryptKey;
+- (NSString *)decryptToken:(NSString *)encryptedToken;
 - (void)initSDKWithClientId:(NSString *)clientId clientToken:(NSString *)clientToken enableLog:(BOOL)enableLog withIAP:(BOOL)withIAP;
 - (void)loginWithProfile:(BOOL)useProfile friends:(BOOL)useFriends;
 - (BOOL)isLoggedIn;
@@ -81,6 +83,59 @@ typedef PoolStringArray GodotStringArray;
 		_sdkInitialized = NO;
 	}
 	return self;
+}
+
+- (NSString *)getDecryptKey {
+	// Try to read from Info.plist first
+	NSDictionary *infoPlist = [[NSBundle mainBundle] infoDictionary];
+	NSString *key = [infoPlist objectForKey:@"TapTapDecryptKey"];
+	
+	if (key && key.length > 0) {
+		NSLog(@"[TapTap] Using decrypt key from Info.plist");
+		return key;
+	}
+	
+	// Fallback to default key (same as Android)
+	NSLog(@"[TapTap] Using default decrypt key");
+	return @"TapTapz9mdoNZSItSxJOvG";
+}
+
+- (NSString *)decryptToken:(NSString *)encryptedToken {
+	if (!encryptedToken || encryptedToken.length == 0) {
+		NSLog(@"[TapTap] Empty encrypted token");
+		return @"";
+	}
+	
+	NSString *decryptKey = [self getDecryptKey];
+	
+	// Base64 decode
+	NSData *encryptedData = [[NSData alloc] initWithBase64EncodedString:encryptedToken options:0];
+	if (!encryptedData) {
+		NSLog(@"[TapTap] Failed to decode Base64 token");
+		return @"";
+	}
+	
+	// XOR decryption
+	NSData *keyData = [decryptKey dataUsingEncoding:NSUTF8StringEncoding];
+	NSMutableData *decryptedData = [NSMutableData dataWithLength:encryptedData.length];
+	
+	const uint8_t *encBytes = (const uint8_t *)[encryptedData bytes];
+	const uint8_t *keyBytes = (const uint8_t *)[keyData bytes];
+	uint8_t *decBytes = (uint8_t *)[decryptedData mutableBytes];
+	
+	for (NSUInteger i = 0; i < encryptedData.length; i++) {
+		decBytes[i] = encBytes[i] ^ keyBytes[i % keyData.length];
+	}
+	
+	NSString *decryptedToken = [[NSString alloc] initWithData:decryptedData encoding:NSUTF8StringEncoding];
+	
+	if (!decryptedToken) {
+		NSLog(@"[TapTap] Failed to decrypt token");
+		return @"";
+	}
+	
+	NSLog(@"[TapTap] Token decrypted successfully");
+	return decryptedToken;
 }
 
 - (void)initSDKWithClientId:(NSString *)clientId clientToken:(NSString *)clientToken enableLog:(BOOL)enableLog withIAP:(BOOL)withIAP {
@@ -394,9 +449,22 @@ void Godot3TapTap::initSdkWithEncryptedToken(const String &p_client_id, const St
 	client_id = p_client_id;
 	sdk_initialized = true;
 	
-	// TODO: Decrypt token before passing to SDK
-	// For now, just call regular init
-	initSdk(p_client_id, p_encrypted_token, p_enable_log, p_with_iap);
+	// Decrypt the token using the key from Info.plist
+	NSString *nsEncryptedToken = [NSString stringWithUTF8String:p_encrypted_token.utf8().get_data()];
+	NSString *nsDecryptedToken = [taptap_delegate decryptToken:nsEncryptedToken];
+	
+	if (!nsDecryptedToken || nsDecryptedToken.length == 0) {
+		NSLog(@"[TapTap] Failed to decrypt token, SDK initialization aborted");
+		Dictionary ret;
+		ret["type"] = "init";
+		ret["result"] = "error";
+		ret["message"] = "Failed to decrypt token";
+		_post_event(ret);
+		return;
+	}
+	
+	String decrypted_token = String::utf8([nsDecryptedToken UTF8String]);
+	initSdk(p_client_id, decrypted_token, p_enable_log, p_with_iap);
 }
 
 // Login

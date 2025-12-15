@@ -1,9 +1,9 @@
 [config]
 name="TapTapLogin"
-binary="godot3taptap.xcframework"
+binary="godot3_taptap.xcframework"
 
-initialization="register_taptaplogin_types"
-deinitialization="unregister_taptaplogin_types"
+initialization="register_godot3_taptap_types"
+deinitialization="unregister_godot3_taptap_types"
 
 [dependencies]
 linked=[]

@@ -39,9 +39,34 @@ jobs:
           ./scripts/release_xcframework.sh 3.x
           ls -l bin/release
 
+      - name: Reorganize for distribution
+        run: |
+          echo "Reorganizing directory structure for distribution..."
+          
+          # Create final distribution structure
+          mkdir -p bin/dist/godot3_taptap/ios_plugins/godot3_taptap
+          mkdir -p bin/dist/godot3_taptap/addons
+          
+          # Copy XCFrameworks and .gdip to ios_plugins
+          cp -r bin/release/godot3_taptap/*.xcframework bin/dist/godot3_taptap/ios_plugins/godot3_taptap/
+          cp bin/release/godot3_taptap/godot3_taptap.gdip bin/dist/godot3_taptap/ios_plugins/godot3_taptap/
+          
+          # Copy addons directory (rename godot3-taptap to godot3_taptap)
+          cp -r addons/godot3-taptap bin/dist/godot3_taptap/addons/godot3_taptap
+          
+          echo "Distribution structure created successfully"
+
+      - name: List release structure
+        run: |
+          echo "Distribution directory structure:"
+          find bin/dist -type d
+          echo ""
+          echo "Files in distribution:"
+          find bin/dist -type f
+
       - uses: actions/upload-artifact@v4
         with:
-          name: plugins
-          path: bin/release/*
-          retention-days: 4
+          name: godot3_taptap-ios-plugin
+          path: bin/dist/godot3_taptap/
+          retention-days: 14
           if-no-files-found: error

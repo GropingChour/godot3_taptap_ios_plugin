@@ -28,8 +28,8 @@
 /* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                */
 /*************************************************************************/
 
-#ifndef GODOT3TAPTAP_H
-#define GODOT3TAPTAP_H
+#ifndef GODOT3_TAPTAP_H
+#define GODOT3_TAPTAP_H
 
 #include "core/version.h"
 
