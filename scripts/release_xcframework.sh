@@ -3,9 +3,9 @@ set -e
 
 if [[ "$1" == "3.x" ]];
 then
-    GODOT_PLUGINS="gamecenter inappstore icloud camera arkit apn photo_picker"
+    GODOT_PLUGINS="godot3taptap"
 else
-    GODOT_PLUGINS="gamecenter inappstore icloud camera apn photo_picker"
+    GODOT_PLUGINS="godot3taptap"
 fi
 
 # Compile Plugin
