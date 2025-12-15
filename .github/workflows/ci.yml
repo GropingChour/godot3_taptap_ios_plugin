@@ -24,6 +24,9 @@ jobs:
           python --version
           scons --version
 
+      - name: Make scripts executable
+        run: chmod +x ./scripts/*.sh
+
       - name: Generate Headers
         run: |
           ./scripts/generate_headers.sh 3.x || true
