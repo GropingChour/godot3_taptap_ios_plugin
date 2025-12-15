@@ -51,8 +51,8 @@ jobs:
           cp -r bin/release/godot3_taptap/*.xcframework bin/dist/godot3_taptap/ios_plugins/godot3_taptap/
           cp bin/release/godot3_taptap/godot3_taptap.gdip bin/dist/godot3_taptap/ios_plugins/godot3_taptap/
           
-          # Copy addons directory (rename godot3-taptap to godot3_taptap)
-          cp -r addons/godot3-taptap bin/dist/godot3_taptap/addons/godot3_taptap
+          # Copy addons directory
+          cp -r addons/godot3_taptap bin/dist/godot3_taptap/addons/godot3_taptap
           
           echo "Distribution structure created successfully"
 
