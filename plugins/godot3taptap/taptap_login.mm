@@ -130,7 +130,7 @@ void TapTapLogin::initSdk(const String &p_client_id, const String &p_client_toke
 	// [TapTapSDK initWithConfig:config];
 	
 	Dictionary ret_data;
-	add_pending_event(\"init\", \"ok\", ret_data);
+	add_pending_event("init", "ok", ret_data);
 }
 
 void TapTapLogin::initSdkWithEncryptedToken(const String &p_client_id, const String &p_encrypted_token, bool p_enable_log, bool p_with_iap) {
@@ -144,7 +144,7 @@ void TapTapLogin::initSdkWithEncryptedToken(const String &p_client_id, const Str
 	// [TapTapSDK initWithConfig:config];
 	
 	Dictionary ret_data;
-	add_pending_event(\"init\", \"ok\", ret_data);
+	add_pending_event("init", "ok", ret_data);
 }
 
 // Login
@@ -168,7 +168,7 @@ void TapTapLogin::login(bool p_use_profile, bool p_use_friends) {
 	// Simulate async login response
 	dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
 		// Emit signal directly for iOS
-		emit_signal(\"onLoginSuccess\");
+		emit_signal("onLoginSuccess");
 	});
 }
 
@@ -188,10 +188,10 @@ String TapTapLogin::getUserProfile() {
 	
 	// Return mock JSON string
 	Dictionary profile;
-	profile[\"name\"] = \"TapTap User\";
-	profile[\"avatar\"] = \"https://example.com/avatar.png\";
-	profile[\"openId\"] = \"mock_open_id\";
-	profile[\"unionId\"] = \"mock_union_id\";
+	profile["name"] = "TapTap User";
+	profile["avatar"] = "https://example.com/avatar.png";
+	profile["openId"] = "mock_open_id";
+	profile["unionId"] = "mock_union_id";
 	
 	return JSON::print(profile);
 }
@@ -203,7 +203,7 @@ void TapTapLogin::logout() {
 	// [TapTapLogin logout];
 	
 	Dictionary ret_data;
-	add_pending_event(\"logout\", \"ok\", ret_data);
+	add_pending_event("logout", "ok", ret_data);
 }
 
 void TapTapLogin::logoutThenRestart() {
