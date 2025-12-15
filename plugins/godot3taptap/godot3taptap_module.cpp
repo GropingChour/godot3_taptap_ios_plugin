@@ -1,5 +1,5 @@
 /*************************************************************************/
-/*  taptap_login.h                                                       */
+/*  godot3taptap_module.cpp                                              */
 /*************************************************************************/
 /*                       This file is part of:                           */
 /*                           GODOT ENGINE                                */
@@ -28,72 +28,27 @@
 /* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                */
 /*************************************************************************/
 
-#ifndef TAPTAP_LOGIN_H
-#define TAPTAP_LOGIN_H
+#include "godot3taptap_module.h"
 
 #include "core/version.h"
 
 #if VERSION_MAJOR == 4
-#include "core/object/class_db.h"
+#include "core/config/engine.h"
 #else
-#include "core/object.h"
+#include "core/engine.h"
 #endif
 
-class TapTapLogin : public Object {
+#include "godot3taptap.h"
 
-	GDCLASS(TapTapLogin, Object);
+Godot3TapTap *godot3taptap;
 
-	static TapTapLogin *instance;
-	static void _bind_methods();
+void register_godot3taptap_types() {
+	godot3taptap = memnew(Godot3TapTap);
+	Engine::get_singleton()->add_singleton(Engine::Singleton("Godot3TapTap", godot3taptap));
+}
 
-	List<Variant> pending_events;
-
-	String client_id;
-	String client_token;
-	bool sdk_initialized;
-
-	void add_pending_event(const String &type, const String &result, const Dictionary &data = Dictionary());
-
-public:
-	// SDK Initialization
-	void initSdk(const String &p_client_id, const String &p_client_token, bool p_enable_log, bool p_with_iap);
-	void initSdkWithEncryptedToken(const String &p_client_id, const String &p_encrypted_token, bool p_enable_log, bool p_with_iap);
-	
-	// Login
-	void login(bool p_use_profile, bool p_use_friends);
-	bool isLogin();
-	String getUserProfile();
-	void logout();
-	void logoutThenRestart();
-	
-	// Compliance (Anti-addiction)
-	void compliance();
-	
-	// License Verification
-	void checkLicense(bool p_force_check);
-	
-	// DLC
-	void queryDLC(const Array &p_sku_ids);
-	void purchaseDLC(const String &p_sku_id);
-	
-	// IAP (In-App Purchase)
-	void queryProductDetailsAsync(const Array &p_products);
-	void launchBillingFlow(const String &p_product_id, const String &p_obfuscated_account_id);
-	void finishPurchaseAsync(const String &p_order_id, const String &p_purchase_token);
-	void queryUnfinishedPurchaseAsync();
-	
-	// Utility
-	void showTip(const String &p_text);
-	void restartApp();
-
-	// Event handling
-	int get_pending_event_count();
-	Variant pop_pending_event();
-
-	static TapTapLogin *get_singleton();
-
-	TapTapLogin();
-	~TapTapLogin();
-};
-
-#endif
+void unregister_godot3taptap_types() {
+	if (godot3taptap) {
+		memdelete(godot3taptap);
+	}
+}

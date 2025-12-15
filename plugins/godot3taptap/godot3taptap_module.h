@@ -1,5 +1,5 @@
 /*************************************************************************/
-/*  taptap_login_module.h                                                */
+/*  godot3taptap_module.h                                                */
 /*************************************************************************/
 /*                       This file is part of:                           */
 /*                           GODOT ENGINE                                */
@@ -28,5 +28,5 @@
 /* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                */
 /*************************************************************************/
 
-void register_taptaplogin_types();
-void unregister_taptaplogin_types();
+void register_godot3taptap_types();
+void unregister_godot3taptap_types();

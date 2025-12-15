@@ -1,0 +1,564 @@
+/*************************************************************************/
+/*  godot3taptap.mm                                                      */
+/*************************************************************************/
+/*                       This file is part of:                           */
+/*                           GODOT ENGINE                                */
+/*                      https://godotengine.org                          */
+/*************************************************************************/
+/* Copyright (c) 2007-2021 Juan Linietsky, Ariel Manzur.                 */
+/* Copyright (c) 2014-2021 Godot Engine contributors (cf. AUTHORS.md).   */
+/*                                                                       */
+/* Permission is hereby granted, free of charge, to any person obtaining */
+/* a copy of this software and associated documentation files (the       */
+/* "Software"), to deal in the Software without restriction, including   */
+/* without limitation the rights to use, copy, modify, merge, publish,   */
+/* distribute, sublicense, and/or sell copies of the Software, and to    */
+/* permit persons to whom the Software is furnished to do so, subject to */
+/* the following conditions:                                             */
+/*                                                                       */
+/* The above copyright notice and this permission notice shall be        */
+/* included in all copies or substantial portions of the Software.       */
+/*                                                                       */
+/* THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,       */
+/* EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF    */
+/* MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.*/
+/* IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY  */
+/* CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,  */
+/* TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE     */
+/* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                */
+/*************************************************************************/
+
+#include "godot3taptap.h"
+
+#if VERSION_MAJOR == 4
+#import "platform/ios/app_delegate.h"
+#import "platform/ios/view_controller.h"
+#include "core/io/json.h"
+#else
+#import "platform/iphone/app_delegate.h"
+#import "platform/iphone/view_controller.h"
+#include "core/io/json.h"
+#endif
+
+#import <Foundation/Foundation.h>
+
+// TODO: Import TapTap SDK headers when integrated
+// #import <TapTapLoginSDK/TapTapLoginSDK.h>
+// #import <TapTapComplianceSDK/TapTapComplianceSDK.h>
+// #import <TapTapLicenseSDK/TapTapLicenseSDK.h>
+
+#if VERSION_MAJOR == 4
+typedef PackedStringArray GodotStringArray;
+#else
+typedef PoolStringArray GodotStringArray;
+#endif
+
+// MARK: - Objective-C Delegate for TapTap SDK callbacks
+
+@interface GodotTapTapDelegate : NSObject
+
+@property(nonatomic, strong) NSString *clientId;
+@property(nonatomic, strong) NSString *clientToken;
+@property(nonatomic, assign) BOOL sdkInitialized;
+
+- (void)initSDKWithClientId:(NSString *)clientId clientToken:(NSString *)clientToken enableLog:(BOOL)enableLog withIAP:(BOOL)withIAP;
+- (void)loginWithProfile:(BOOL)useProfile friends:(BOOL)useFriends;
+- (BOOL)isLoggedIn;
+- (NSDictionary *)getUserProfile;
+- (void)logout;
+- (void)startCompliance;
+- (void)checkLicenseWithForce:(BOOL)force;
+- (void)queryDLCWithSkuIds:(NSArray *)skuIds;
+- (void)purchaseDLCWithSkuId:(NSString *)skuId;
+
+@end
+
+@implementation GodotTapTapDelegate
+
+- (instancetype)init {
+	self = [super init];
+	if (self) {
+		_sdkInitialized = NO;
+	}
+	return self;
+}
+
+- (void)initSDKWithClientId:(NSString *)clientId clientToken:(NSString *)clientToken enableLog:(BOOL)enableLog withIAP:(BOOL)withIAP {
+	_clientId = clientId;
+	_clientToken = clientToken;
+	
+	NSLog(@"[TapTap] Initializing SDK with clientId: %@, enableLog: %d, withIAP: %d", clientId, enableLog, withIAP);
+	
+	// TODO: Call real TapTap SDK initialization
+	/*
+	TapTapSDKConfig *config = [[TapTapSDKConfig alloc] init];
+	config.clientId = clientId;
+	config.clientToken = clientToken;
+	config.enableLog = enableLog;
+	[TapTapSDK initWithConfig:config];
+	*/
+	
+	_sdkInitialized = YES;
+	
+	// Post init success event
+	Dictionary ret;
+	ret["type"] = "init";
+	ret["result"] = "ok";
+	Godot3TapTap::get_singleton()->_post_event(ret);
+}
+
+- (void)loginWithProfile:(BOOL)useProfile friends:(BOOL)useFriends {
+	NSLog(@"[TapTap] Login called with useProfile: %d, useFriends: %d", useProfile, useFriends);
+	
+	NSMutableArray *scopes = [NSMutableArray array];
+	if (useProfile) {
+		[scopes addObject:@"public_profile"];
+	} else {
+		[scopes addObject:@"basic_info"];
+	}
+	if (useFriends) {
+		[scopes addObject:@"user_friends"];
+	}
+	
+	// TODO: Call real TapTap SDK login
+	/*
+	[TapTapLogin loginWithScopes:scopes completion:^(TapTapAccount *account, NSError *error) {
+		if (error) {
+			Dictionary ret;
+			ret["type"] = "login";
+			ret["result"] = "error";
+			ret["message"] = String::utf8([error.localizedDescription UTF8String]);
+			Godot3TapTap::get_singleton()->_post_event(ret);
+		} else if (account) {
+			Dictionary ret;
+			ret["type"] = "login";
+			ret["result"] = "success";
+			ret["openId"] = String::utf8([account.openId UTF8String]);
+			ret["unionId"] = String::utf8([account.unionId UTF8String]);
+			ret["name"] = String::utf8([account.name UTF8String]);
+			ret["avatar"] = String::utf8([account.avatar UTF8String]);
+			Godot3TapTap::get_singleton()->_post_event(ret);
+		}
+	}];
+	*/
+	
+	// Mock success for testing
+	dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+		Dictionary ret;
+		ret["type"] = "login";
+		ret["result"] = "success";
+		ret["openId"] = "mock_open_id";
+		ret["unionId"] = "mock_union_id";
+		ret["name"] = "Test User";
+		ret["avatar"] = "https://example.com/avatar.png";
+		Godot3TapTap::get_singleton()->_post_event(ret);
+	});
+}
+
+- (BOOL)isLoggedIn {
+	// TODO: Check real TapTap SDK login status
+	// return [TapTapLogin isLoggedIn];
+	return NO;
+}
+
+- (NSDictionary *)getUserProfile {
+	// TODO: Get real user profile from TapTap SDK
+	/*
+	TapTapAccount *account = [TapTapLogin getCurrentAccount];
+	if (account) {
+		return @{
+			@"openId": account.openId ?: @"",
+			@"unionId": account.unionId ?: @"",
+			@"name": account.name ?: @"",
+			@"avatar": account.avatar ?: @""
+		};
+	}
+	*/
+	return @{};
+}
+
+- (void)logout {
+	NSLog(@"[TapTap] Logout called");
+	
+	// TODO: Call real TapTap SDK logout
+	// [TapTapLogin logout];
+	
+	Dictionary ret;
+	ret["type"] = "logout";
+	ret["result"] = "ok";
+	Godot3TapTap::get_singleton()->_post_event(ret);
+}
+
+- (void)startCompliance {
+	NSLog(@"[TapTap] Starting compliance check");
+	
+	// TODO: Call real TapTap Compliance SDK
+	/*
+	[TapTapCompliance startup:userId callback:^(int code, NSString *message) {
+		Dictionary ret;
+		ret["type"] = "compliance";
+		ret["code"] = code;
+		ret["info"] = String::utf8([message UTF8String]);
+		Godot3TapTap::get_singleton()->_post_event(ret);
+	}];
+	*/
+	
+	// Mock compliance success (500 = LOGIN_SUCCESS)
+	dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.3 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+		Dictionary ret;
+		ret["type"] = "compliance";
+		ret["code"] = 500;
+		ret["info"] = "LOGIN_SUCCESS";
+		Godot3TapTap::get_singleton()->_post_event(ret);
+	});
+}
+
+- (void)checkLicenseWithForce:(BOOL)force {
+	NSLog(@"[TapTap] Checking license with force: %d", force);
+	
+	// TODO: Call real TapTap License SDK
+	/*
+	[TapTapLicense checkLicense:force callback:^(BOOL success) {
+		Dictionary ret;
+		ret["type"] = "license";
+		ret["result"] = success ? "success" : "failed";
+		Godot3TapTap::get_singleton()->_post_event(ret);
+	}];
+	*/
+	
+	// Mock license success
+	dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+		Dictionary ret;
+		ret["type"] = "license";
+		ret["result"] = "success";
+		Godot3TapTap::get_singleton()->_post_event(ret);
+	});
+}
+
+- (void)queryDLCWithSkuIds:(NSArray *)skuIds {
+	NSLog(@"[TapTap] Querying DLC with %lu SKUs", (unsigned long)[skuIds count]);
+	
+	// TODO: Call real TapTap License SDK DLC query
+	/*
+	[TapTapLicense queryDLC:skuIds callback:^(TapLicenseQueryCode code, NSDictionary *queryList) {
+		Dictionary ret;
+		ret["type"] = "dlc_query";
+		ret["code"] = code;
+		// Convert queryList to Godot Dictionary
+		Dictionary godot_query_list;
+		for (NSString *key in queryList) {
+			godot_query_list[String::utf8([key UTF8String])] = [queryList[key] intValue];
+		}
+		ret["queryList"] = godot_query_list;
+		Godot3TapTap::get_singleton()->_post_event(ret);
+	}];
+	*/
+	
+	// Mock query result
+	Dictionary ret;
+	ret["type"] = "dlc_query";
+	ret["code"] = 0;
+	ret["codeName"] = "QUERY_RESULT_OK";
+	Dictionary query_list;
+	for (NSString *skuId in skuIds) {
+		query_list[String::utf8([skuId UTF8String])] = 0; // 0 = not purchased
+	}
+	ret["queryList"] = query_list;
+	
+	NSError *error = nil;
+	NSData *jsonData = [NSJSONSerialization dataWithJSONObject:@{
+		@"code": @0,
+		@"codeName": @"QUERY_RESULT_OK",
+		@"queryList": @{}
+	} options:0 error:&error];
+	NSString *jsonString = [[NSString alloc] initWithData:jsonData encoding:NSUTF8StringEncoding];
+	ret["jsonString"] = String::utf8([jsonString UTF8String]);
+	
+	Godot3TapTap::get_singleton()->_post_event(ret);
+}
+
+- (void)purchaseDLCWithSkuId:(NSString *)skuId {
+	NSLog(@"[TapTap] Purchasing DLC: %@", skuId);
+	
+	// TODO: Call real TapTap License SDK DLC purchase
+	/*
+	[TapTapLicense purchaseDLC:skuId callback:^(NSString *sku, TapLicensePurchaseCode status) {
+		Dictionary ret;
+		ret["type"] = "dlc_purchase";
+		ret["skuId"] = String::utf8([sku UTF8String]);
+		ret["status"] = status;
+		Godot3TapTap::get_singleton()->_post_event(ret);
+	}];
+	*/
+	
+	// Mock purchase result (0 = not purchased)
+	Dictionary ret;
+	ret["type"] = "dlc_purchase";
+	ret["skuId"] = String::utf8([skuId UTF8String]);
+	ret["status"] = 0;
+	Godot3TapTap::get_singleton()->_post_event(ret);
+}
+
+@end
+
+// MARK: - Static delegate instance
+static GodotTapTapDelegate *taptap_delegate = nil;
+
+// MARK: - C++ Plugin Implementation
+
+Godot3TapTap *Godot3TapTap::instance = NULL;
+
+void Godot3TapTap::_bind_methods() {
+	// SDK Initialization
+	ClassDB::bind_method(D_METHOD("initSdk"), &Godot3TapTap::initSdk);
+	ClassDB::bind_method(D_METHOD("initSdkWithEncryptedToken"), &Godot3TapTap::initSdkWithEncryptedToken);
+	
+	// Login
+	ClassDB::bind_method(D_METHOD("login"), &Godot3TapTap::login);
+	ClassDB::bind_method(D_METHOD("isLogin"), &Godot3TapTap::isLogin);
+	ClassDB::bind_method(D_METHOD("getUserProfile"), &Godot3TapTap::getUserProfile);
+	ClassDB::bind_method(D_METHOD("logout"), &Godot3TapTap::logout);
+	ClassDB::bind_method(D_METHOD("logoutThenRestart"), &Godot3TapTap::logoutThenRestart);
+	
+	// Compliance
+	ClassDB::bind_method(D_METHOD("compliance"), &Godot3TapTap::compliance);
+	
+	// License Verification
+	ClassDB::bind_method(D_METHOD("checkLicense"), &Godot3TapTap::checkLicense);
+	
+	// DLC
+	ClassDB::bind_method(D_METHOD("queryDLC"), &Godot3TapTap::queryDLC);
+	ClassDB::bind_method(D_METHOD("purchaseDLC"), &Godot3TapTap::purchaseDLC);
+	
+	// IAP
+	ClassDB::bind_method(D_METHOD("queryProductDetailsAsync"), &Godot3TapTap::queryProductDetailsAsync);
+	ClassDB::bind_method(D_METHOD("launchBillingFlow"), &Godot3TapTap::launchBillingFlow);
+	ClassDB::bind_method(D_METHOD("finishPurchaseAsync"), &Godot3TapTap::finishPurchaseAsync);
+	ClassDB::bind_method(D_METHOD("queryUnfinishedPurchaseAsync"), &Godot3TapTap::queryUnfinishedPurchaseAsync);
+	
+	// Utility
+	ClassDB::bind_method(D_METHOD("showTip"), &Godot3TapTap::showTip);
+	ClassDB::bind_method(D_METHOD("restartApp"), &Godot3TapTap::restartApp);
+
+	// Event handling
+	ClassDB::bind_method(D_METHOD("get_pending_event_count"), &Godot3TapTap::get_pending_event_count);
+	ClassDB::bind_method(D_METHOD("pop_pending_event"), &Godot3TapTap::pop_pending_event);
+	
+	// Signals
+	ADD_SIGNAL(MethodInfo("onLoginSuccess"));
+	ADD_SIGNAL(MethodInfo("onLoginFail", PropertyInfo(Variant::STRING, "message")));
+	ADD_SIGNAL(MethodInfo("onLoginCancel"));
+	ADD_SIGNAL(MethodInfo("onComplianceResult", PropertyInfo(Variant::INT, "code"), PropertyInfo(Variant::STRING, "info")));
+	ADD_SIGNAL(MethodInfo("onLicenseSuccess"));
+	ADD_SIGNAL(MethodInfo("onLicenseFailed"));
+	ADD_SIGNAL(MethodInfo("onDLCQueryResult", PropertyInfo(Variant::STRING, "jsonString")));
+	ADD_SIGNAL(MethodInfo("onDLCPurchaseResult", PropertyInfo(Variant::STRING, "skuId"), PropertyInfo(Variant::INT, "status")));
+	ADD_SIGNAL(MethodInfo("onProductDetailsResponse", PropertyInfo(Variant::STRING, "jsonString")));
+	ADD_SIGNAL(MethodInfo("onPurchaseUpdated", PropertyInfo(Variant::STRING, "jsonString")));
+	ADD_SIGNAL(MethodInfo("onFinishPurchaseResponse", PropertyInfo(Variant::STRING, "jsonString")));
+	ADD_SIGNAL(MethodInfo("onQueryUnfinishedPurchaseResponse", PropertyInfo(Variant::STRING, "jsonString")));
+	ADD_SIGNAL(MethodInfo("onLaunchBillingFlowResult", PropertyInfo(Variant::STRING, "jsonString")));
+}
+
+// Helper method to add events
+void Godot3TapTap::add_pending_event(const String &type, const String &result, const Dictionary &data) {
+	Dictionary event;
+	event["type"] = type;
+	event["result"] = result;
+	if (!data.empty()) {
+		for (int i = 0; i < data.keys().size(); i++) {
+			Variant key = data.keys()[i];
+			event[key] = data[key];
+		}
+	}
+	pending_events.push_back(event);
+}
+
+void Godot3TapTap::_post_event(Variant p_event) {
+	pending_events.push_back(p_event);
+}
+
+// SDK Initialization
+void Godot3TapTap::initSdk(const String &p_client_id, const String &p_client_token, bool p_enable_log, bool p_with_iap) {
+	client_id = p_client_id;
+	client_token = p_client_token;
+	sdk_initialized = true;
+	
+	NSString *nsClientId = [NSString stringWithUTF8String:p_client_id.utf8().get_data()];
+	NSString *nsClientToken = [NSString stringWithUTF8String:p_client_token.utf8().get_data()];
+	
+	[taptap_delegate initSDKWithClientId:nsClientId clientToken:nsClientToken enableLog:p_enable_log withIAP:p_with_iap];
+}
+
+void Godot3TapTap::initSdkWithEncryptedToken(const String &p_client_id, const String &p_encrypted_token, bool p_enable_log, bool p_with_iap) {
+	client_id = p_client_id;
+	sdk_initialized = true;
+	
+	// TODO: Decrypt token before passing to SDK
+	// For now, just call regular init
+	initSdk(p_client_id, p_encrypted_token, p_enable_log, p_with_iap);
+}
+
+// Login
+void Godot3TapTap::login(bool p_use_profile, bool p_use_friends) {
+	[taptap_delegate loginWithProfile:p_use_profile friends:p_use_friends];
+}
+
+bool Godot3TapTap::isLogin() {
+	return [taptap_delegate isLoggedIn];
+}
+
+String Godot3TapTap::getUserProfile() {
+	NSDictionary *profile = [taptap_delegate getUserProfile];
+	
+	// Convert NSDictionary to JSON string
+	NSError *error = nil;
+	NSData *jsonData = [NSJSONSerialization dataWithJSONObject:profile options:0 error:&error];
+	if (error) {
+		NSLog(@"[TapTap] Error converting profile to JSON: %@", error);
+		return "{}";
+	}
+	
+	NSString *jsonString = [[NSString alloc] initWithData:jsonData encoding:NSUTF8StringEncoding];
+	return String::utf8([jsonString UTF8String]);
+}
+
+void Godot3TapTap::logout() {
+	[taptap_delegate logout];
+}
+
+void Godot3TapTap::logoutThenRestart() {
+	logout();
+	restartApp();
+}
+
+// Compliance (Anti-addiction)
+void Godot3TapTap::compliance() {
+	[taptap_delegate startCompliance];
+}
+
+// License Verification
+void Godot3TapTap::checkLicense(bool p_force_check) {
+	[taptap_delegate checkLicenseWithForce:p_force_check];
+}
+
+// DLC
+void Godot3TapTap::queryDLC(const Array &p_sku_ids) {
+	NSMutableArray *skuIds = [NSMutableArray array];
+	for (int i = 0; i < p_sku_ids.size(); i++) {
+		String sku = p_sku_ids[i];
+		[skuIds addObject:[NSString stringWithUTF8String:sku.utf8().get_data()]];
+	}
+	
+	[taptap_delegate queryDLCWithSkuIds:skuIds];
+}
+
+void Godot3TapTap::purchaseDLC(const String &p_sku_id) {
+	NSString *skuId = [NSString stringWithUTF8String:p_sku_id.utf8().get_data()];
+	[taptap_delegate purchaseDLCWithSkuId:skuId];
+}
+
+// IAP (In-App Purchase) - Not supported on iOS
+void Godot3TapTap::queryProductDetailsAsync(const Array &p_products) {
+	NSLog(@"[TapTap] queryProductDetailsAsync called (not supported on iOS)");
+	
+	Dictionary result;
+	result["error"] = "IAP not supported on iOS";
+	add_pending_event("product_details", "error", result);
+}
+
+void Godot3TapTap::launchBillingFlow(const String &p_product_id, const String &p_obfuscated_account_id) {
+	NSLog(@"[TapTap] launchBillingFlow called (not supported on iOS)");
+	
+	Dictionary result;
+	result["error"] = "IAP not supported on iOS";
+	add_pending_event("billing_flow", "error", result);
+}
+
+void Godot3TapTap::finishPurchaseAsync(const String &p_order_id, const String &p_purchase_token) {
+	NSLog(@"[TapTap] finishPurchaseAsync called (not supported on iOS)");
+	
+	Dictionary result;
+	result["error"] = "IAP not supported on iOS";
+	add_pending_event("finish_purchase", "error", result);
+}
+
+void Godot3TapTap::queryUnfinishedPurchaseAsync() {
+	NSLog(@"[TapTap] queryUnfinishedPurchaseAsync called (not supported on iOS)");
+	
+	Dictionary result;
+	result["error"] = "IAP not supported on iOS";
+	add_pending_event("unfinished_purchase", "error", result);
+}
+
+// Utility
+void Godot3TapTap::showTip(const String &p_text) {
+	NSLog(@"[TapTap] showTip: %@", [NSString stringWithUTF8String:p_text.utf8().get_data()]);
+	
+	// TODO: Show native iOS alert/toast
+	dispatch_async(dispatch_get_main_queue(), ^{
+		UIAlertController *alert = [UIAlertController alertControllerWithTitle:nil 
+			message:[NSString stringWithUTF8String:p_text.utf8().get_data()]
+			preferredStyle:UIAlertControllerStyleAlert];
+		
+		[alert addAction:[UIAlertAction actionWithTitle:@"OK" 
+			style:UIAlertActionStyleDefault handler:nil]];
+		
+		UIViewController *rootVC = [UIApplication sharedApplication].keyWindow.rootViewController;
+		[rootVC presentViewController:alert animated:YES completion:nil];
+	});
+}
+
+void Godot3TapTap::restartApp() {
+	NSLog(@"[TapTap] restartApp called");
+	
+	// iOS doesn't support programmatic app restart
+	// Best practice: show alert and exit
+	dispatch_async(dispatch_get_main_queue(), ^{
+		UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Restart Required"
+			message:@"Please close and reopen the app."
+			preferredStyle:UIAlertControllerStyleAlert];
+		
+		[alert addAction:[UIAlertAction actionWithTitle:@"OK" 
+			style:UIAlertActionStyleDefault 
+			handler:^(UIAlertAction * _Nonnull action) {
+				exit(0);
+			}]];
+		
+		UIViewController *rootVC = [UIApplication sharedApplication].keyWindow.rootViewController;
+		[rootVC presentViewController:alert animated:YES completion:nil];
+	});
+}
+
+int Godot3TapTap::get_pending_event_count() {
+	return pending_events.size();
+}
+
+Variant Godot3TapTap::pop_pending_event() {
+	Variant front = pending_events.front()->get();
+	pending_events.pop_front();
+	return front;
+}
+
+Godot3TapTap *Godot3TapTap::get_singleton() {
+	return instance;
+}
+
+Godot3TapTap::Godot3TapTap() {
+	ERR_FAIL_COND(instance != NULL);
+	instance = this;
+	sdk_initialized = false;
+	
+	// Initialize Objective-C delegate
+	taptap_delegate = [[GodotTapTapDelegate alloc] init];
+	
+	NSLog(@"[TapTap] Godot3TapTap singleton created");
+}
+
+Godot3TapTap::~Godot3TapTap() {
+	// Clean up Objective-C delegate
+	taptap_delegate = nil;
+	
+	instance = NULL;
+	NSLog(@"[TapTap] Godot3TapTap singleton destroyed");
+}

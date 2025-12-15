@@ -1,5 +1,5 @@
 /*************************************************************************/
-/*  taptap_login_module.cpp                                              */
+/*  taptap_login.h                                                       */
 /*************************************************************************/
 /*                       This file is part of:                           */
 /*                           GODOT ENGINE                                */
@@ -28,27 +28,74 @@
 /* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                */
 /*************************************************************************/
 
-#include "taptap_login_module.h"
+#ifndef GODOT3TAPTAP_H
+#define GODOT3TAPTAP_H
 
 #include "core/version.h"
 
 #if VERSION_MAJOR == 4
-#include "core/config/engine.h"
+#include "core/object/class_db.h"
 #else
-#include "core/engine.h"
+#include "core/object.h"
 #endif
 
-#include "taptap_login.h"
+class Godot3TapTap : public Object {
 
-TapTapLogin *taptap_login;
+	GDCLASS(Godot3TapTap, Object);
 
-void register_taptaplogin_types() {
-	taptap_login = memnew(TapTapLogin);
-	Engine::get_singleton()->add_singleton(Engine::Singleton("TapTapLogin", taptap_login));
-}
+	static Godot3TapTap *instance;
+	static void _bind_methods();
 
-void unregister_taptaplogin_types() {
-	if (taptap_login) {
-		memdelete(taptap_login);
-	}
-}
+	List<Variant> pending_events;
+
+	String client_id;
+	String client_token;
+	bool sdk_initialized;
+
+	void add_pending_event(const String &type, const String &result, const Dictionary &data = Dictionary());
+
+public:
+	void _post_event(Variant p_event);
+
+	// SDK Initialization
+	void initSdk(const String &p_client_id, const String &p_client_token, bool p_enable_log, bool p_with_iap);
+	void initSdkWithEncryptedToken(const String &p_client_id, const String &p_encrypted_token, bool p_enable_log, bool p_with_iap);
+	
+	// Login
+	void login(bool p_use_profile, bool p_use_friends);
+	bool isLogin();
+	String getUserProfile();
+	void logout();
+	void logoutThenRestart();
+	
+	// Compliance (Anti-addiction)
+	void compliance();
+	
+	// License Verification
+	void checkLicense(bool p_force_check);
+	
+	// DLC
+	void queryDLC(const Array &p_sku_ids);
+	void purchaseDLC(const String &p_sku_id);
+	
+	// IAP (In-App Purchase)
+	void queryProductDetailsAsync(const Array &p_products);
+	void launchBillingFlow(const String &p_product_id, const String &p_obfuscated_account_id);
+	void finishPurchaseAsync(const String &p_order_id, const String &p_purchase_token);
+	void queryUnfinishedPurchaseAsync();
+	
+	// Utility
+	void showTip(const String &p_text);
+	void restartApp();
+
+	// Event handling
+	int get_pending_event_count();
+	Variant pop_pending_event();
+
+	static Godot3TapTap *get_singleton();
+
+	Godot3TapTap();
+	~Godot3TapTap();
+};
+
+#endif
