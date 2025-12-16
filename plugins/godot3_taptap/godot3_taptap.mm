@@ -196,19 +196,19 @@ typedef PoolStringArray GodotStringArray;
 				ret["message"] = String::utf8([error.localizedDescription UTF8String]);
 				Godot3TapTap::get_singleton()->_post_event(ret);
 			}
-		} else if (success && account) {
-			// Login successful - extract profile from TapTapAccount
+		} else if (success && account && account.userInfo) {
+			// Login successful - extract profile from TapTapAccount.userInfo
 			Dictionary ret;
 			ret["type"] = "login";
 			ret["result"] = "success";
-			ret["openId"] = String::utf8([account.openid UTF8String] ?: "");
-			ret["unionId"] = String::utf8([account.unionid UTF8String] ?: "");
-			ret["name"] = String::utf8([account.name UTF8String] ?: "");
-			ret["avatar"] = String::utf8([account.avatar UTF8String] ?: "");
+			ret["openId"] = String::utf8([account.userInfo.openId UTF8String] ?: "");
+			ret["unionId"] = String::utf8([account.userInfo.unionId UTF8String] ?: "");
+			ret["name"] = String::utf8([account.userInfo.name UTF8String] ?: "");
+			ret["avatar"] = String::utf8([account.userInfo.avatar UTF8String] ?: "");
 			Godot3TapTap::get_singleton()->_post_event(ret);
 			
 			// Store user ID for compliance
-			self.currentUserId = account.openid;
+			self.currentUserId = account.userInfo.openId;
 		}
 	}];
 }
@@ -221,12 +221,12 @@ typedef PoolStringArray GodotStringArray;
 - (NSDictionary *)getUserProfile {
 	// Get user profile from TapTap SDK
 	TapTapAccount *account = [TapTapLogin getCurrentTapAccount];
-	if (account) {
+	if (account && account.userInfo) {
 		return @{
-			@"openId": account.openid ?: @"",
-			@"unionId": account.unionid ?: @"",
-			@"name": account.name ?: @"",
-			@"avatar": account.avatar ?: @""
+			@"openId": account.userInfo.openId ?: @"",
+			@"unionId": account.userInfo.unionId ?: @"",
+			@"name": account.userInfo.name ?: @"",
+			@"avatar": account.userInfo.avatar ?: @""
 		};
 	}
 	return @{};
@@ -486,12 +486,12 @@ void Godot3TapTap::logoutThenRestart() {
 
 // Compliance (Anti-addiction)
 void Godot3TapTap::compliance() {
-	// Use stored user ID from login, or openid from current account
+	// Use stored user ID from login, or openId from current account
 	NSString *userId = [taptap_delegate currentUserId];
 	if (!userId || userId.length == 0) {
 		TapTapAccount *account = [TapTapLogin getCurrentTapAccount];
-		if (account && account.openid) {
-			userId = account.openid;
+		if (account && account.userInfo && account.userInfo.openId) {
+			userId = account.userInfo.openId;
 		}
 	}
 	
