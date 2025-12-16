@@ -158,6 +158,23 @@ else:
         'godot/platform/ios',
     ])
 
+# Add framework search paths for TapTap SDK (godot3_taptap plugin)
+if env['plugin'] == 'godot3_taptap':
+    sdk_frameworks = [
+        'plugins/godot3_taptap/sdk/TapTapLoginSDK.xcframework/' + ('ios-arm64' if not env['simulator'] else 'ios-arm64_x86_64-simulator'),
+        'plugins/godot3_taptap/sdk/TapTapComplianceSDK.xcframework/' + ('ios-arm64' if not env['simulator'] else 'ios-arm64_x86_64-simulator'),
+        'plugins/godot3_taptap/sdk/TapTapCoreSDK.xcframework/' + ('ios-arm64' if not env['simulator'] else 'ios-arm64_x86_64-simulator'),
+        'plugins/godot3_taptap/sdk/TapTapBasicToolsSDK.xcframework/' + ('ios-arm64' if not env['simulator'] else 'ios-arm64_x86_64-simulator'),
+        'plugins/godot3_taptap/sdk/TapTapNetworkSDK.xcframework/' + ('ios-arm64' if not env['simulator'] else 'ios-arm64_x86_64-simulator'),
+        'plugins/godot3_taptap/sdk/TapTapGidSDK.xcframework/' + ('ios-arm64' if not env['simulator'] else 'ios-arm64_x86_64-simulator'),
+        'plugins/godot3_taptap/sdk/tapsdkcorecpp.xcframework/' + ('ios-arm64' if not env['simulator'] else 'ios-arm64_x86_64-simulator'),
+        'plugins/godot3_taptap/sdk/TapTapSDKBridgeCore.xcframework/' + ('ios-arm64' if not env['simulator'] else 'ios-arm64_x86_64-simulator'),
+        'plugins/godot3_taptap/sdk/THEMISLite.xcframework/' + ('ios-arm64' if not env['simulator'] else 'ios-arm64_x86_64-simulator'),
+    ]
+    for framework_path in sdk_frameworks:
+        env.Append(CCFLAGS=['-F', framework_path])
+        env.Append(LINKFLAGS=['-F', framework_path])
+
 # tweak this if you want to use different folders, or more folders, to store your source code in.
 sources = Glob('plugins/' + env['plugin'] + '/*.cpp')
 sources.append(Glob('plugins/' + env['plugin'] + '/*.mm'))
