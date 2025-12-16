@@ -16,7 +16,7 @@ var save_key_btn
 const KEY_FILE_PATH_RAW = "res://android/build/Godot3TapTap/src/main/res/raw/taptap_decrypt_key.txt"
 const KEY_FILE_PATH_XML = "res://android/build/Godot3TapTap/src/main/res/values/taptap_keys.xml"
 # iOS 密钥配置：直接修改 .gdip 文件的 [plist] 部分
-const KEY_FILE_PATH_IOS_GDIP = "res://ios_plugins/godot3_taptap/godot3_taptap.gdip"
+const KEY_FILE_PATH_IOS_GDIP = "res://ios/plugins/godot3_taptap/godot3_taptap.gdip"
 
 # 当前加密密钥（从文件读取或默认值）
 var current_key = "TapTapz9mdoNZSItSxJOvG"

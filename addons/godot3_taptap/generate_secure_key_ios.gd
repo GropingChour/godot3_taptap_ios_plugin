@@ -4,7 +4,7 @@ extends EditorScript
 # TapTap iOS 密钥生成工具
 # 生成随机密钥并更新 iOS .gdip 文件
 
-const GDIP_PATH = "res://ios_plugins/godot3_taptap/godot3_taptap.gdip"
+const GDIP_PATH = "res://ios/plugins/godot3_taptap/godot3_taptap.gdip"
 
 func _run():
 	print("=".repeat(60))

@@ -57,11 +57,13 @@ Download the latest release from [Releases](https://github.com/GropingChour/godo
 
 ```
 YourProject/
-├── ios_plugins/
-│   └── godot3_taptap/
-│       ├── godot3_taptap.gdip
-│       ├── godot3_taptap.xcframework
-│       └── sdk/  (11 xcframeworks + 2 bundles)
+├── ios/
+│   └── plugins/
+│       └── godot3_taptap/
+│           ├── godot3_taptap.gdip
+│           ├── godot3_taptap.release.xcframework
+│           ├── godot3_taptap.debug.xcframework
+│           └── sdk/  (11 xcframeworks + 2 bundles)
 └── addons/
     └── godot3_taptap/
         ├── plugin.cfg
