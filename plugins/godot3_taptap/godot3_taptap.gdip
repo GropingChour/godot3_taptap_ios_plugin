@@ -27,6 +27,9 @@ capabilities=[]
 files=[]
 
 [plist]
-# TapTap SDK configuration can be added here if needed
-# Example:
+# TapTap Decrypt Key - 用户可在导出窗口输入，或通过 info.plist 文件配置
+# 使用 TapTap Token 加密配置工具生成密钥后，在此输入或保存到 info.plist
+TapTapDecryptKey:string_input="TapTapz9mdoNZSItSxJOvG"
+
+# TapTap SDK configuration
 # NSAppTransportSecurity/NSAllowsArbitraryLoads=true

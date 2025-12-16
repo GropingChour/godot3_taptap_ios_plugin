@@ -42,10 +42,10 @@
 
 #import <Foundation/Foundation.h>
 
-// TODO: Import TapTap SDK headers when integrated
-// #import <TapTapLoginSDK/TapTapLoginSDK.h>
-// #import <TapTapComplianceSDK/TapTapComplianceSDK.h>
-// #import <TapTapLicenseSDK/TapTapLicenseSDK.h>
+// TapTap SDK Headers
+#import <TapTapLoginSDK/TapTapLoginSDK.h>
+#import <TapTapComplianceSDK/TapTapComplianceSDK.h>
+#import <TapTapCoreSDK/TapTapCoreSDK.h>
 
 #if VERSION_MAJOR == 4
 typedef PackedStringArray GodotStringArray;
@@ -144,14 +144,14 @@ typedef PoolStringArray GodotStringArray;
 	
 	NSLog(@"[TapTap] Initializing SDK with clientId: %@, enableLog: %d, withIAP: %d", clientId, enableLog, withIAP);
 	
-	// TODO: Call real TapTap SDK initialization
-	/*
-	TapTapSDKConfig *config = [[TapTapSDKConfig alloc] init];
-	config.clientId = clientId;
-	config.clientToken = clientToken;
-	config.enableLog = enableLog;
-	[TapTapSDK initWithConfig:config];
-	*/
+	// Initialize TapTap SDK
+	TapTapSdkOptions *options = [[TapTapSdkOptions alloc] init];
+	options.clientId = clientId;
+	options.clientToken = clientToken;
+	options.region = TapTapRegionTypeCN;
+	options.enableLog = enableLog;
+	
+	[TapTapSDK initWithOptions:options];
 	
 	_sdkInitialized = YES;
 	
@@ -175,68 +175,62 @@ typedef PoolStringArray GodotStringArray;
 		[scopes addObject:@"user_friends"];
 	}
 	
-	// TODO: Call real TapTap SDK login
-	/*
-	[TapTapLogin loginWithScopes:scopes completion:^(TapTapAccount *account, NSError *error) {
+	// Call TapTap Login SDK
+	[TapTapLogin startWithScopes:scopes options:LeanCloudAuthOptionsTapTap completion:^(TDSUser *user, NSError *error) {
 		if (error) {
-			Dictionary ret;
-			ret["type"] = "login";
-			ret["result"] = "error";
-			ret["message"] = String::utf8([error.localizedDescription UTF8String]);
-			Godot3TapTap::get_singleton()->_post_event(ret);
-		} else if (account) {
+			if (error.code == 1) {
+				// User cancelled
+				Dictionary ret;
+				ret["type"] = "login";
+				ret["result"] = "cancel";
+				Godot3TapTap::get_singleton()->_post_event(ret);
+			} else {
+				// Error occurred
+				Dictionary ret;
+				ret["type"] = "login";
+				ret["result"] = "error";
+				ret["message"] = String::utf8([error.localizedDescription UTF8String]);
+				Godot3TapTap::get_singleton()->_post_event(ret);
+			}
+		} else if (user) {
+			// Login successful
+			NSDictionary *profile = [TapTapLogin currentProfile];
 			Dictionary ret;
 			ret["type"] = "login";
 			ret["result"] = "success";
-			ret["openId"] = String::utf8([account.openId UTF8String]);
-			ret["unionId"] = String::utf8([account.unionId UTF8String]);
-			ret["name"] = String::utf8([account.name UTF8String]);
-			ret["avatar"] = String::utf8([account.avatar UTF8String]);
+			ret["openId"] = String::utf8([[profile objectForKey:@"openid"] UTF8String] ?: "");
+			ret["unionId"] = String::utf8([[profile objectForKey:@"unionid"] UTF8String] ?: "");
+			ret["name"] = String::utf8([[profile objectForKey:@"name"] UTF8String] ?: "");
+			ret["avatar"] = String::utf8([[profile objectForKey:@"avatar"] UTF8String] ?: "");
 			Godot3TapTap::get_singleton()->_post_event(ret);
 		}
 	}];
-	*/
-	
-	// Mock success for testing
-	dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-		Dictionary ret;
-		ret["type"] = "login";
-		ret["result"] = "success";
-		ret["openId"] = "mock_open_id";
-		ret["unionId"] = "mock_union_id";
-		ret["name"] = "Test User";
-		ret["avatar"] = "https://example.com/avatar.png";
-		Godot3TapTap::get_singleton()->_post_event(ret);
-	});
 }
 
 - (BOOL)isLoggedIn {
-	// TODO: Check real TapTap SDK login status
-	// return [TapTapLogin isLoggedIn];
-	return NO;
+	// Check TapTap SDK login status
+	return [TDSUser currentUser] != nil && [TapTapLogin currentProfile] != nil;
 }
 
 - (NSDictionary *)getUserProfile {
-	// TODO: Get real user profile from TapTap SDK
-	/*
-	TapTapAccount *account = [TapTapLogin getCurrentAccount];
-	if (account) {
+	// Get user profile from TapTap SDK
+	NSDictionary *profile = [TapTapLogin currentProfile];
+	if (profile) {
 		return @{
-			@"openId": account.openId ?: @"",
-			@"unionId": account.unionId ?: @"",
-			@"name": account.name ?: @"",
-			@"avatar": account.avatar ?: @""
+			@"openId": [profile objectForKey:@"openid"] ?: @"",
+			@"unionId": [profile objectForKey:@"unionid"] ?: @"",
+			@"name": [profile objectForKey:@"name"] ?: @"",
+			@"avatar": [profile objectForKey:@"avatar"] ?: @""
 		};
 	}
-	*/
 	return @{};
 }
 
 - (void)logout {
 	NSLog(@"[TapTap] Logout called");
 	
-	// TODO: Call real TapTap SDK logout
-	// [TapTapLogin logout];
+	// Call TapTap SDK logout
+	[TapTapLogin logout];
 	
 	Dictionary ret;
 	ret["type"] = "logout";
@@ -247,83 +241,63 @@ typedef PoolStringArray GodotStringArray;
 - (void)startCompliance {
 	NSLog(@"[TapTap] Starting compliance check");
 	
-	// TODO: Call real TapTap Compliance SDK
-	/*
-	[TapTapCompliance startup:userId callback:^(int code, NSString *message) {
+	// Call TapTap Compliance SDK
+	TDSUser *currentUser = [TDSUser currentUser];
+	if (currentUser) {
+		[TapTapCompliance enterWithUserId:currentUser.objectId callback:^(NSInteger code, NSString *message) {
+			Dictionary ret;
+			ret["type"] = "compliance";
+			ret["code"] = (int)code;
+			ret["info"] = String::utf8([message UTF8String]);
+			Godot3TapTap::get_singleton()->_post_event(ret);
+		}];
+	} else {
+		NSLog(@"[TapTap] Cannot start compliance: user not logged in");
 		Dictionary ret;
 		ret["type"] = "compliance";
-		ret["code"] = code;
-		ret["info"] = String::utf8([message UTF8String]);
+		ret["code"] = -1;
+		ret["info"] = "User not logged in";
 		Godot3TapTap::get_singleton()->_post_event(ret);
-	}];
-	*/
-	
-	// Mock compliance success (500 = LOGIN_SUCCESS)
-	dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.3 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-		Dictionary ret;
-		ret["type"] = "compliance";
-		ret["code"] = 500;
-		ret["info"] = "LOGIN_SUCCESS";
-		Godot3TapTap::get_singleton()->_post_event(ret);
-	});
+	}
 }
 
 - (void)checkLicenseWithForce:(BOOL)force {
 	NSLog(@"[TapTap] Checking license with force: %d", force);
 	
-	// TODO: Call real TapTap License SDK
-	/*
-	[TapTapLicense checkLicense:force callback:^(BOOL success) {
-		Dictionary ret;
-		ret["type"] = "license";
-		ret["result"] = success ? "success" : "failed";
-		Godot3TapTap::get_singleton()->_post_event(ret);
-	}];
-	*/
+	// Note: TapTap License SDK is not available for iOS
+	// License verification should be done on Android or server-side
+	NSLog(@"[TapTap] Warning: License check not supported on iOS");
 	
-	// Mock license success
-	dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-		Dictionary ret;
-		ret["type"] = "license";
-		ret["result"] = "success";
-		Godot3TapTap::get_singleton()->_post_event(ret);
-	});
+	// Return success for compatibility (actual check should be on Android/server)
+	Dictionary ret;
+	ret["type"] = "license";
+	ret["result"] = "success";
+	ret["message"] = "iOS does not support license check";
+	Godot3TapTap::get_singleton()->_post_event(ret);
 }
 
 - (void)queryDLCWithSkuIds:(NSArray *)skuIds {
 	NSLog(@"[TapTap] Querying DLC with %lu SKUs", (unsigned long)[skuIds count]);
 	
-	// TODO: Call real TapTap License SDK DLC query
-	/*
-	[TapTapLicense queryDLC:skuIds callback:^(TapLicenseQueryCode code, NSDictionary *queryList) {
-		Dictionary ret;
-		ret["type"] = "dlc_query";
-		ret["code"] = code;
-		// Convert queryList to Godot Dictionary
-		Dictionary godot_query_list;
-		for (NSString *key in queryList) {
-			godot_query_list[String::utf8([key UTF8String])] = [queryList[key] intValue];
-		}
-		ret["queryList"] = godot_query_list;
-		Godot3TapTap::get_singleton()->_post_event(ret);
-	}];
-	*/
+	// Note: TapTap DLC SDK is not available for iOS
+	// DLC operations should be done on Android or server-side
+	NSLog(@"[TapTap] Warning: DLC query not supported on iOS");
 	
-	// Mock query result
+	// Return empty result for compatibility
 	Dictionary ret;
 	ret["type"] = "dlc_query";
-	ret["code"] = 0;
-	ret["codeName"] = "QUERY_RESULT_OK";
+	ret["code"] = -1;
+	ret["codeName"] = "NOT_SUPPORTED_ON_IOS";
 	Dictionary query_list;
 	for (NSString *skuId in skuIds) {
-		query_list[String::utf8([skuId UTF8String])] = 0; // 0 = not purchased
+		query_list[String::utf8([skuId UTF8String])] = 0;
 	}
 	ret["queryList"] = query_list;
 	
 	NSError *error = nil;
 	NSData *jsonData = [NSJSONSerialization dataWithJSONObject:@{
-		@"code": @0,
-		@"codeName": @"QUERY_RESULT_OK",
+		@"code": @-1,
+		@"codeName": @"NOT_SUPPORTED_ON_IOS",
 		@"queryList": @{}
 	} options:0 error:&error];
 	NSString *jsonString = [[NSString alloc] initWithData:jsonData encoding:NSUTF8StringEncoding];
@@ -335,22 +309,16 @@ typedef PoolStringArray GodotStringArray;
 - (void)purchaseDLCWithSkuId:(NSString *)skuId {
 	NSLog(@"[TapTap] Purchasing DLC: %@", skuId);
 	
-	// TODO: Call real TapTap License SDK DLC purchase
-	/*
-	[TapTapLicense purchaseDLC:skuId callback:^(NSString *sku, TapLicensePurchaseCode status) {
-		Dictionary ret;
-		ret["type"] = "dlc_purchase";
-		ret["skuId"] = String::utf8([sku UTF8String]);
-		ret["status"] = status;
-		Godot3TapTap::get_singleton()->_post_event(ret);
-	}];
-	*/
+	// Note: TapTap DLC SDK is not available for iOS
+	// DLC operations should be done on Android or server-side
+	NSLog(@"[TapTap] Warning: DLC purchase not supported on iOS");
 	
-	// Mock purchase result (0 = not purchased)
+	// Return error for compatibility
 	Dictionary ret;
 	ret["type"] = "dlc_purchase";
 	ret["skuId"] = String::utf8([skuId UTF8String]);
-	ret["status"] = 0;
+	ret["status"] = -1;
+	ret["message"] = "Not supported on iOS";
 	Godot3TapTap::get_singleton()->_post_event(ret);
 }
 

@@ -15,7 +15,8 @@ var save_key_btn
 # 密钥文件路径
 const KEY_FILE_PATH_RAW = "res://android/build/Godot3TapTap/src/main/res/raw/taptap_decrypt_key.txt"
 const KEY_FILE_PATH_XML = "res://android/build/Godot3TapTap/src/main/res/values/taptap_keys.xml"
-const KEY_FILE_PATH_IOS_PLIST = "res://ios_plugins/godot3_taptap/info.plist"
+# iOS 密钥配置：直接修改 .gdip 文件的 [plist] 部分
+const KEY_FILE_PATH_IOS_GDIP = "res://ios_plugins/godot3_taptap/godot3_taptap.gdip"
 
 # 当前加密密钥（从文件读取或默认值）
 var current_key = "TapTapz9mdoNZSItSxJOvG"
@@ -32,22 +33,21 @@ func _setup_ui():
 	_create_ui()
 
 func _load_or_create_key():
-	# 加载密钥文件，如果不存在则创建默认密钥
-	# 先尝试从 iOS plist 读取
-	if _load_key_from_ios_plist():
+	# 加载密钥文件，如果不存在则使用默认密钥
+	# 先尝试从 iOS .gdip 读取
+	if _load_key_from_ios_gdip():
 		return
 	
-	# 再尝试从 XML 文件读取
+	# 再尝试从 Android XML 文件读取
 	if _load_key_from_xml():
 		return
 	
-	# 最后尝试从 RAW 文件读取
+	# 最后尝试从 Android RAW 文件读取
 	if _load_key_from_raw():
 		return
 	
-	# 如果都不存在，创建默认密钥
-	_save_key_to_files(current_key)
-	print("创建默认密钥文件")
+	# 如果都不存在，使用默认密钥
+	print("使用默认密钥：", current_key)
 
 func _load_key_from_xml() -> bool:
 	# 从 XML 文件读取密钥
@@ -89,23 +89,22 @@ func _load_key_from_raw() -> bool:
 					return true
 	return false
 
-func _load_key_from_ios_plist() -> bool:
-	# 从 iOS Info.plist 文件读取密钥
+func _load_key_from_ios_gdip() -> bool:
+	# 从 iOS .gdip 文件读取密钥
+	var gdip_path = ProjectSettings.globalize_path(KEY_FILE_PATH_IOS_GDIP)
 	var file = File.new()
-	var plist_path = ProjectSettings.globalize_path(KEY_FILE_PATH_IOS_PLIST)
 	
-	if file.file_exists(plist_path):
-		if file.open(plist_path, File.READ) == OK:
-			var content = file.get_as_text()
-			file.close()
-			
-			# 解析 plist 内容，提取 TapTapDecryptKey
-			var regex = RegEx.new()
-			regex.compile('<key>TapTapDecryptKey</key>\\s*<string>([^<]+)</string>')
-			var result = regex.search(content)
-			if result:
-				current_key = result.get_string(1)
-				print("从 iOS Info.plist 读取密钥：", current_key)
+	if not file.file_exists(gdip_path):
+		return false
+	
+	var config = ConfigFile.new()
+	var err = config.load(gdip_path)
+	
+	if err == OK:
+		if config.has_section_key("plist", "TapTapDecryptKey:string_input"):
+			current_key = config.get_value("plist", "TapTapDecryptKey:string_input", "")
+			if not current_key.empty():
+				print("从 iOS .gdip 读取密钥：", current_key)
 				return true
 	return false
 
@@ -182,7 +181,7 @@ func _create_key_section():
 	
 	# 密钥文件路径显示
 	var key_path_label = Label.new()
-	key_path_label.text = "密钥文件位置:\n• iOS: " + ProjectSettings.globalize_path(KEY_FILE_PATH_IOS_PLIST) + "\n• Android XML: " + ProjectSettings.globalize_path(KEY_FILE_PATH_XML) + "\n• Android RAW: " + ProjectSettings.globalize_path(KEY_FILE_PATH_RAW)
+	key_path_label.text = "密钥文件位置:\n• iOS: " + ProjectSettings.globalize_path(KEY_FILE_PATH_IOS_GDIP) + " ([plist] section)\n• Android XML: " + ProjectSettings.globalize_path(KEY_FILE_PATH_XML) + "\n• Android RAW: " + ProjectSettings.globalize_path(KEY_FILE_PATH_RAW)
 	key_path_label.autowrap = true
 	group.add_child(key_path_label)
 	
@@ -248,15 +247,15 @@ func _on_generate_key_pressed():
 	status_label.text = "✅ 已生成随机密钥，记得保存！"
 
 func _on_save_ios_pressed():
-	# 保存密钥到 iOS
+	# 保存密钥到 iOS .gdip
 	var new_key = key_input.text.strip_edges()
 	if new_key.empty():
 		status_label.text = "❌ 密钥不能为空"
 		return
 	
-	if _save_key_to_ios_plist(new_key):
+	if _save_key_to_ios_gdip(new_key):
 		current_key = new_key
-		status_label.text = "✅ 密钥已保存到 iOS Info.plist"
+		status_label.text = "✅ 密钥已保存到 iOS .gdip"
 	else:
 		status_label.text = "❌ 保存 iOS 密钥失败"
 
@@ -278,7 +277,7 @@ func _on_save_android_pressed():
 
 func _save_key_to_files(key: String) -> bool:
 	# 保存密钥到所有平台文件 (内部使用)
-	var ios_success = _save_key_to_ios_plist(key)
+	var ios_success = _save_key_to_ios_gdip(key)
 	var xml_success = _save_key_to_xml(key)
 	var raw_success = _save_key_to_raw(key)
 	return ios_success or xml_success or raw_success
@@ -334,72 +333,33 @@ func _save_key_to_raw(key: String) -> bool:
 		print("无法保存 RAW 密钥文件")
 		return false
 
-func _save_key_to_ios_plist(key: String) -> bool:
-	# 保存密钥到 iOS Info.plist 文件
+func _save_key_to_ios_gdip(key: String) -> bool:
+	# 保存密钥到 iOS .gdip 文件
+	var gdip_path = ProjectSettings.globalize_path(KEY_FILE_PATH_IOS_GDIP)
 	var file = File.new()
-	var plist_path = ProjectSettings.globalize_path(KEY_FILE_PATH_IOS_PLIST)
 	
-	# 确保目录存在
-	var dir = Directory.new()
-	var dir_path = plist_path.get_base_dir()
-	if not dir.dir_exists(dir_path):
-		if dir.make_dir_recursive(dir_path) != OK:
-			print("无法创建目录：", dir_path)
-			return false
+	if not file.file_exists(gdip_path):
+		print("找不到 .gdip 文件：", gdip_path)
+		return false
 	
-	# 检查文件是否存在
-	var content = ""
-	var has_key = false
+	var config = ConfigFile.new()
+	var err = config.load(gdip_path)
 	
-	if file.file_exists(plist_path):
-		# 读取现有内容
-		if file.open(plist_path, File.READ) == OK:
-			content = file.get_as_text()
-			file.close()
-			
-			# 检查是否已有 TapTapDecryptKey
-			var regex = RegEx.new()
-			regex.compile('<key>TapTapDecryptKey</key>\\s*<string>([^<]+)</string>')
-			var result = regex.search(content)
-			
-			if result:
-				# 替换现有密钥
-				has_key = true
-				content = regex.sub(content, '<key>TapTapDecryptKey</key>\n\t<string>' + key + '</string>')
-		else:
-			print("iOS Info.plist 不存在，将创建新文件")
+	if err != OK:
+		print("无法加载 .gdip 文件：", err)
+		return false
 	
-	# 如果文件不存在或没有密钥，需要添加密钥
-	if not has_key:
-		if content.empty():
-			# 创建新的 plist 文件
-			content = """<?xml version=\"1.0\" encoding=\"UTF-8\"?>
-<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">
-<plist version=\"1.0\">
-<dict>
-\t<key>TapTapDecryptKey</key>
-\t<string>""" + key + """</string>
-</dict>
-</plist>
-"""
-		else:
-			# 在现有 plist 中插入密钥（在 </dict> 之前）
-			var dict_end_pos = content.rfind("</dict>")
-			if dict_end_pos > 0:
-				var insert_text = "\t<key>TapTapDecryptKey</key>\n\t<string>" + key + "</string>\n"
-				content = content.insert(dict_end_pos, insert_text)
-			else:
-				print("无法解析 iOS Info.plist 格式")
-				return false
+	# 更新或添加密钥到 [plist] 部分
+	config.set_value("plist", "TapTapDecryptKey:string_input", key)
 	
-	# 写入文件
-	if file.open(plist_path, File.WRITE) == OK:
-		file.store_string(content)
-		file.close()
-		print("密钥已保存到 iOS Info.plist：", plist_path)
+	# 保存回文件
+	err = config.save(gdip_path)
+	
+	if err == OK:
+		print("密钥已保存到 iOS .gdip：", gdip_path)
 		return true
 	else:
-		print("无法保存 iOS Info.plist 文件")
+		print("无法保存 .gdip 文件：", err)
 		return false
 
 func _on_encrypt_pressed():

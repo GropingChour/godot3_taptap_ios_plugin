@@ -51,8 +51,13 @@ jobs:
           cp -r bin/release/godot3_taptap/*.xcframework bin/dist/godot3_taptap/ios_plugins/godot3_taptap/
           cp bin/release/godot3_taptap/godot3_taptap.gdip bin/dist/godot3_taptap/ios_plugins/godot3_taptap/
           
-          # Copy addons directory
+          # Copy TapTap SDK frameworks (required dependencies)
+          cp -r plugins/godot3_taptap/sdk bin/dist/godot3_taptap/ios_plugins/godot3_taptap/
+          
+          # Copy addons directory (includes key generation tools)
           cp -r addons/godot3_taptap bin/dist/godot3_taptap/addons/godot3_taptap
+          
+          # Note: info.plist is NOT included - users generate it with taptap_config_window.gd
           
           echo "Distribution structure created successfully"
 
