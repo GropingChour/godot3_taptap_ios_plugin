@@ -55,11 +55,12 @@ typedef PoolStringArray GodotStringArray;
 
 // MARK: - Objective-C Delegate for TapTap SDK callbacks
 
-@interface GodotTapTapDelegate : NSObject
+@interface GodotTapTapDelegate : NSObject <TapTapComplianceDelegate>
 
 @property(nonatomic, strong) NSString *clientId;
 @property(nonatomic, strong) NSString *clientToken;
 @property(nonatomic, assign) BOOL sdkInitialized;
+@property(nonatomic, strong) NSString *currentUserId;
 
 - (NSString *)getDecryptKey;
 - (NSString *)decryptToken:(NSString *)encryptedToken;
@@ -68,7 +69,7 @@ typedef PoolStringArray GodotStringArray;
 - (BOOL)isLoggedIn;
 - (NSDictionary *)getUserProfile;
 - (void)logout;
-- (void)startCompliance;
+- (void)startComplianceWithUserId:(NSString *)userId;
 - (void)checkLicenseWithForce:(BOOL)force;
 - (void)queryDLCWithSkuIds:(NSArray *)skuIds;
 - (void)purchaseDLCWithSkuId:(NSString *)skuId;
@@ -81,6 +82,9 @@ typedef PoolStringArray GodotStringArray;
 	self = [super init];
 	if (self) {
 		_sdkInitialized = NO;
+		_currentUserId = nil;
+		// Register as compliance delegate
+		[TapTapCompliance registerComplianceDelegate:self];
 	}
 	return self;
 }
@@ -175,8 +179,8 @@ typedef PoolStringArray GodotStringArray;
 		[scopes addObject:@"user_friends"];
 	}
 	
-	// Call TapTap Login SDK
-	[TapTapLogin startWithScopes:scopes options:LeanCloudAuthOptionsTapTap completion:^(TDSUser *user, NSError *error) {
+	// Call TapTap Login SDK (using correct OC API)
+	[TapTapLogin LoginWithScopes:scopes viewController:nil handler:^(BOOL success, NSError *error, TapTapAccount *account) {
 		if (error) {
 			if (error.code == 1) {
 				// User cancelled
@@ -192,35 +196,37 @@ typedef PoolStringArray GodotStringArray;
 				ret["message"] = String::utf8([error.localizedDescription UTF8String]);
 				Godot3TapTap::get_singleton()->_post_event(ret);
 			}
-		} else if (user) {
-			// Login successful
-			NSDictionary *profile = [TapTapLogin currentProfile];
+		} else if (success && account) {
+			// Login successful - extract profile from TapTapAccount
 			Dictionary ret;
 			ret["type"] = "login";
 			ret["result"] = "success";
-			ret["openId"] = String::utf8([[profile objectForKey:@"openid"] UTF8String] ?: "");
-			ret["unionId"] = String::utf8([[profile objectForKey:@"unionid"] UTF8String] ?: "");
-			ret["name"] = String::utf8([[profile objectForKey:@"name"] UTF8String] ?: "");
-			ret["avatar"] = String::utf8([[profile objectForKey:@"avatar"] UTF8String] ?: "");
+			ret["openId"] = String::utf8([account.openid UTF8String] ?: "");
+			ret["unionId"] = String::utf8([account.unionid UTF8String] ?: "");
+			ret["name"] = String::utf8([account.name UTF8String] ?: "");
+			ret["avatar"] = String::utf8([account.avatar UTF8String] ?: "");
 			Godot3TapTap::get_singleton()->_post_event(ret);
+			
+			// Store user ID for compliance
+			self.currentUserId = account.openid;
 		}
 	}];
 }
 
 - (BOOL)isLoggedIn {
 	// Check TapTap SDK login status
-	return [TDSUser currentUser] != nil && [TapTapLogin currentProfile] != nil;
+	return [TapTapLogin getCurrentTapAccount] != nil;
 }
 
 - (NSDictionary *)getUserProfile {
 	// Get user profile from TapTap SDK
-	NSDictionary *profile = [TapTapLogin currentProfile];
-	if (profile) {
+	TapTapAccount *account = [TapTapLogin getCurrentTapAccount];
+	if (account) {
 		return @{
-			@"openId": [profile objectForKey:@"openid"] ?: @"",
-			@"unionId": [profile objectForKey:@"unionid"] ?: @"",
-			@"name": [profile objectForKey:@"name"] ?: @"",
-			@"avatar": [profile objectForKey:@"avatar"] ?: @""
+			@"openId": account.openid ?: @"",
+			@"unionId": account.unionid ?: @"",
+			@"name": account.name ?: @"",
+			@"avatar": account.avatar ?: @""
 		};
 	}
 	return @{};
@@ -231,6 +237,9 @@ typedef PoolStringArray GodotStringArray;
 	
 	// Call TapTap SDK logout
 	[TapTapLogin logout];
+	[TapTapCompliance exit];
+	
+	self.currentUserId = nil;
 	
 	Dictionary ret;
 	ret["type"] = "logout";
@@ -238,27 +247,34 @@ typedef PoolStringArray GodotStringArray;
 	Godot3TapTap::get_singleton()->_post_event(ret);
 }
 
-- (void)startCompliance {
-	NSLog(@"[TapTap] Starting compliance check");
+- (void)startComplianceWithUserId:(NSString *)userId {
+	NSLog(@"[TapTap] Starting compliance with userId: %@", userId);
 	
-	// Call TapTap Compliance SDK
-	TDSUser *currentUser = [TDSUser currentUser];
-	if (currentUser) {
-		[TapTapCompliance enterWithUserId:currentUser.objectId callback:^(NSInteger code, NSString *message) {
-			Dictionary ret;
-			ret["type"] = "compliance";
-			ret["code"] = (int)code;
-			ret["info"] = String::utf8([message UTF8String]);
-			Godot3TapTap::get_singleton()->_post_event(ret);
-		}];
-	} else {
-		NSLog(@"[TapTap] Cannot start compliance: user not logged in");
+	if (!userId || userId.length == 0) {
+		NSLog(@"[TapTap] Cannot start compliance: invalid user ID");
 		Dictionary ret;
 		ret["type"] = "compliance";
 		ret["code"] = -1;
-		ret["info"] = "User not logged in";
+		ret["info"] = "Invalid user ID";
 		Godot3TapTap::get_singleton()->_post_event(ret);
+		return;
 	}
+	
+	// Call TapTap Compliance SDK
+	[TapTapCompliance startup:userId];
+	
+	// Callback will be received via complianceCallbackWithCode:extra:
+}
+
+// TapTapComplianceDelegate method
+- (void)complianceCallbackWithCode:(TapComplianceResultHandlerCode)code extra:(NSString * _Nullable)extra {
+	NSLog(@"[TapTap] Compliance callback: code=%ld, extra=%@", (long)code, extra);
+	
+	Dictionary ret;
+	ret["type"] = "compliance";
+	ret["code"] = (int)code;
+	ret["info"] = String::utf8([extra UTF8String] ?: "");
+	Godot3TapTap::get_singleton()->_post_event(ret);
 }
 
 - (void)checkLicenseWithForce:(BOOL)force {
@@ -470,7 +486,16 @@ void Godot3TapTap::logoutThenRestart() {
 
 // Compliance (Anti-addiction)
 void Godot3TapTap::compliance() {
-	[taptap_delegate startCompliance];
+	// Use stored user ID from login, or openid from current account
+	NSString *userId = [taptap_delegate currentUserId];
+	if (!userId || userId.length == 0) {
+		TapTapAccount *account = [TapTapLogin getCurrentTapAccount];
+		if (account && account.openid) {
+			userId = account.openid;
+		}
+	}
+	
+	[taptap_delegate startComplianceWithUserId:userId];
 }
 
 // License Verification
