@@ -1,3 +1,5 @@
+# STILL WORKING, NOT USE IT!!!
+
 # Godot3 TapTap iOS Plugin
 
 TapTap SDK integration plugin for Godot 3.x on iOS platform. This plugin wraps TapTap's login, compliance (anti-addiction), and core SDK functionalities as a Godot singleton accessible from GDScript.
