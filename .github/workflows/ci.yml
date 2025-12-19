@@ -27,7 +27,7 @@ jobs:
           architecture: 'x64'
 
       - name: Cache SCons build artifacts
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             ${{ env.SCONS_CACHE }}
@@ -38,7 +38,7 @@ jobs:
             ${{ runner.os }}-scons-
 
       - name: Cache Godot headers
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             godot/bin/*.a
