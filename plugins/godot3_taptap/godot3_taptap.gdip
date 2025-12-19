@@ -22,9 +22,11 @@ embedded=[
 ]
 system=[]
 
+linker_flags="-ObjC -all_load"
+
 capabilities=[]
 
 files=[]
 
 [plist]
-TapTapDecryptKey:string_input="TapTapz9mdoNZSItSxJOvG"
+TapTapDecryptKey:string_input="TapTap73sev5b6P5eZxAy2"

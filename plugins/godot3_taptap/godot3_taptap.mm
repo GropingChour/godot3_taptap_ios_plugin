@@ -127,6 +127,7 @@ typedef PoolStringArray GodotStringArray;
 	const uint8_t *keyBytes = (const uint8_t *)[keyData bytes];
 	uint8_t *decBytes = (uint8_t *)[decryptedData mutableBytes];
 	
+	// XOR decrypt each byte
 	for (NSUInteger i = 0; i < encryptedData.length; i++) {
 		decBytes[i] = encBytes[i] ^ keyBytes[i % keyData.length];
 	}
@@ -134,11 +135,11 @@ typedef PoolStringArray GodotStringArray;
 	NSString *decryptedToken = [[NSString alloc] initWithData:decryptedData encoding:NSUTF8StringEncoding];
 	
 	if (!decryptedToken) {
-		NSLog(@"[TapTap] Failed to decrypt token");
+		NSLog(@"[TapTap] Failed to convert decrypted data to UTF-8 string");
 		return @"";
 	}
 	
-	NSLog(@"[TapTap] Token decrypted successfully");
+	NSLog(@"[TapTap] Token decrypted successfully (length: %lu)", (unsigned long)decryptedToken.length);
 	return decryptedToken;
 }
 
