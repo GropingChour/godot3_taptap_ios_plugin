@@ -635,6 +635,13 @@ void Godot3TapTap::restartApp() {
 			handler:^(UIAlertAction * _Nonnull action) {
 				exit(0);
 			}]];
+		
+		UIViewController *rootVC = [UIApplication sharedApplication].keyWindow.rootViewController;
+		[rootVC presentViewController:alert animated:YES completion:nil];
+	});
+}
+
+int Godot3TapTap::get_pending_event_count() {
 	int count = pending_events.size();
 	NSLog(@"[TapTap] get_pending_event_count: %d", count);
 	return count;
@@ -652,14 +659,6 @@ Variant Godot3TapTap::pop_pending_event() {
 	pending_events.pop_front();
 	
 	NSLog(@"[TapTap] Event popped, remaining count: %d", pending_events.size());
-	
-int Godot3TapTap::get_pending_event_count() {
-	return pending_events.size();
-}
-
-Variant Godot3TapTap::pop_pending_event() {
-	Variant front = pending_events.front()->get();
-	pending_events.pop_front();
 	return front;
 }
 
