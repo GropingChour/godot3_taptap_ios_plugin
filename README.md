@@ -165,18 +165,56 @@ If the app crashes at startup with:
 '+[TapTapEvent captureUncaughtException]: unrecognized selector sent to class'
 ```
 
-**Cause**: Objective-C categories and class methods from the TapTap SDK aren't being loaded properly.
+**Root Cause**: Objective-C categories and class methods from the TapTap SDK (written in Swift) aren't being loaded properly at runtime.
 
-**Solution**: The plugin now includes `-ObjC -all_load` linker flags in the `.gdip` file (v1.1+). If you still encounter this:
+**Solution**: The plugin includes `-ObjC -all_load` linker flags in the `.gdip` file to force load all Objective-C symbols.
 
-1. Re-export your project with the updated plugin
-2. Or manually add in Xcode:
-   - Select your target → **Build Settings**
-   - Search for "Other Linker Flags"
-   - Add: `-ObjC -all_load`
-3. Clean build (<kbd>Cmd+Shift+K</kbd>) and retry
+### Linker Error: "duplicate symbol" with `-all_load`
 
-**Note on duplicate symbols**: If `-all_load` causes "duplicate symbol" errors with other libraries, use selective force loading or `-force_load` for specific frameworks.
+If you get duplicate symbol errors like:
+```
+duplicate symbol '_TapTapEvent' in:
+    TapTapBasicToolsSDK.framework/TapTapBasicToolsSDK
+    inappstore.framework/inappstore
+ld: 1 duplicate symbol for architecture arm64
+clang: error: linker command failed with exit code 1
+```
+
+**Cause**: Multiple frameworks contain the same symbols (likely from shared TapTap SDK code).
+
+**Solution**: Use selective force loading instead of `-all_load`:
+
+1. In Xcode, open your project
+2. Select your target → **Build Settings** → **All** → **Combined**
+3. Search for "Other Linker Flags"
+4. Replace the default with selective force load:
+   ```
+   -ObjC -force_load $(BUILT_PRODUCTS_DIR)/libgodot3_taptap.a
+   ```
+   Or for XCFramework:
+   ```
+   -ObjC
+   ```
+5. Remove the `.gdip` linker_flags setting temporarily to test
+6. Clean build and rebuild
+
+**Alternative Solution (Recommended for multiple plugins)**:
+
+1. Open Xcode project
+2. Target → Build Settings → search "Symbols"
+3. Set "Hide Symbols by Default" to **YES** 
+4. Add this to "Other Linker Flags":
+   ```
+   -ObjC -undefined suppress -flat_namespace
+   ```
+
+**Option 3: Add Dummy Swift File**
+
+This forces proper Swift/Objective-C runtime linking:
+1. In Xcode: **File → New → File → Swift File**
+2. Name it `Dummy.swift` (leave empty)
+3. When prompted to create bridging header, click **Create**
+4. Rebuild - this usually resolves symbol conflicts automatically
 
 ### Token Looks Like "Garbage" in Logs
 

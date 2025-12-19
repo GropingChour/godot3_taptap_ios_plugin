@@ -147,6 +147,7 @@ typedef PoolStringArray GodotStringArray;
 	_clientId = clientId;
 	_clientToken = clientToken;
 	
+	NSLog(@"[TapTap] initSDKWithClientId called on thread: %@", [NSThread currentThread]);
 	NSLog(@"[TapTap] Initializing SDK with clientId: %@, enableLog: %d, withIAP: %d", clientId, enableLog, withIAP);
 	
 	// Initialize TapTap SDK
@@ -160,14 +161,21 @@ typedef PoolStringArray GodotStringArray;
 	
 	_sdkInitialized = YES;
 	
-	// Post init success event
-	Dictionary ret;
-	ret["type"] = "init";
-	ret["result"] = "ok";
-	Godot3TapTap::get_singleton()->_post_event(ret);
+	NSLog(@"[TapTap] SDK initialized, about to post init event");
+	
+	// Post init success event on main thread
+	dispatch_async(dispatch_get_main_queue(), ^{
+		NSLog(@"[TapTap] Posting init event on main thread");
+		Dictionary ret;
+		ret["type"] = "init";
+		ret["result"] = "ok";
+		Godot3TapTap::get_singleton()->_post_event(ret);
+		NSLog(@"[TapTap] Init event posted");
+	});
 }
 
 - (void)loginWithProfile:(BOOL)useProfile friends:(BOOL)useFriends {
+	NSLog(@"[TapTap] loginWithProfile called on thread: %@", [NSThread currentThread]);
 	NSLog(@"[TapTap] Login called with useProfile: %d, useFriends: %d", useProfile, useFriends);
 	
 	NSMutableArray *scopes = [NSMutableArray array];
@@ -180,26 +188,44 @@ typedef PoolStringArray GodotStringArray;
 		[scopes addObject:@"user_friends"];
 	}
 	
+	NSLog(@"[TapTap] Calling TapTapLogin.LoginWithScopes");
+	
 	// Call TapTap Login SDK (using correct OC API)
 	[TapTapLogin LoginWithScopes:scopes viewController:nil handler:^(BOOL success, NSError *error, TapTapAccount *account) {
-		if (error) {
-			if (error.code == 1) {
-				// User cancelled
-				Dictionary ret;
-				ret["type"] = "login";
-				ret["result"] = "cancel";
-				Godot3TapTap::get_singleton()->_post_event(ret);
-			} else {
-				// Error occurred
-				Dictionary ret;
-				ret["type"] = "login";
-				ret["result"] = "error";
-				ret["message"] = String::utf8([error.localizedDescription UTF8String]);
-				Godot3TapTap::get_singleton()->_post_event(ret);
-			}
-		} else if (success && account && account.userInfo) {
-			// Login successful - extract profile from TapTapAccount.userInfo
+		NSLog(@"[TapTap] Login handler callback on thread: %@", [NSThread currentThread]);
+		NSLog(@"[TapTap] Login result: success=%d, error=%@, account=%@", success, error, account);
+		
+		// Post events on main thread
+		dispatch_async(dispatch_get_main_queue(), ^{
+			NSLog(@"[TapTap] Processing login result on main thread");
+			
+			if (error) {
+				if (error.code == 1) {
+					// User cancelled
+					NSLog(@"[TapTap] User cancelled login");
+					Dictionary ret;
+					ret["type"] = "login";
+					ret["result"] = "cancel";
+			NSLog(@"[TapTap] Login successful, preparing success event");
 			Dictionary ret;
+			ret["type"] = "login";
+			ret["result"] = "success";
+			ret["openId"] = String::utf8([account.userInfo.openId UTF8String] ?: "");
+			ret["unionId"] = String::utf8([account.userInfo.unionId UTF8String] ?: "");
+			ret["name"] = String::utf8([account.userInfo.name UTF8String] ?: "");
+			ret["avatar"] = String::utf8([account.userInfo.avatar UTF8String] ?: "");
+			Godot3TapTap::get_singleton()->_post_event(ret);
+			NSLog(@"[TapTap] Login success event posted");
+			
+			// Store user ID for compliance
+			self.currentUserId = account.userInfo.openId;
+			NSLog(@"[TapTap] Stored currentUserId: %@", self.currentUserId);
+		}
+		NSLog(@"[TapTap] Login handler completed");
+		});
+	}];
+	
+	NSLog(@"[TapTap] TapTapLogin.LoginWithScopes call returned")Dictionary ret;
 			ret["type"] = "login";
 			ret["result"] = "success";
 			ret["openId"] = String::utf8([account.userInfo.openId UTF8String] ?: "");
@@ -262,13 +288,19 @@ typedef PoolStringArray GodotStringArray;
 	}
 	
 	// Call TapTap Compliance SDK
-	[TapTapCompliance startup:userId];
+	[TapTapCompliancecomplianceCallbackWithCode called on thread: %@", [NSThread currentThread]);
+	NSLog(@"[TapTap] Compliance callback: code=%ld, extra=%@", (long)code, extra);
 	
-	// Callback will be received via complianceCallbackWithCode:extra:
-}
-
-// TapTapComplianceDelegate method
-- (void)complianceCallbackWithCode:(TapComplianceResultHandlerCode)code extra:(NSString * _Nullable)extra {
+	// Post event on main thread
+	dispatch_async(dispatch_get_main_queue(), ^{
+		NSLog(@"[TapTap] Posting compliance event on main thread");
+		Dictionary ret;
+		ret["type"] = "compliance";
+		ret["code"] = (int)code;
+		ret["info"] = String::utf8([extra UTF8String] ?: "");
+		Godot3TapTap::get_singleton()->_post_event(ret);
+		NSLog(@"[TapTap] Compliance event posted");
+	}ceResultHandlerCode)code extra:(NSString * _Nullable)extra {
 	NSLog(@"[TapTap] Compliance callback: code=%ld, extra=%@", (long)code, extra);
 	
 	Dictionary ret;
@@ -402,6 +434,7 @@ void Godot3TapTap::_bind_methods() {
 
 // Helper method to add events
 void Godot3TapTap::add_pending_event(const String &type, const String &result, const Dictionary &data) {
+	NSLog(@"[TapTap] add_pending_event called: type=%s, result=%s", type.utf8().get_data(), result.utf8().get_data());
 	Dictionary event;
 	event["type"] = type;
 	event["result"] = result;
@@ -412,10 +445,26 @@ void Godot3TapTap::add_pending_event(const String &type, const String &result, c
 		}
 	}
 	pending_events.push_back(event);
+	NSLog(@"[TapTap] Event added, pending count: %d", pending_events.size());
 }
 
 void Godot3TapTap::_post_event(Variant p_event) {
+	NSLog(@"[TapTap] _post_event called from thread: %@", [NSThread currentThread]);
+	
+	// Ensure we're on the main thread for Godot operations
+	if (![NSThread isMainThread]) {
+		NSLog(@"[TapTap] WARNING: _post_event called from background thread, dispatching to main thread");
+		dispatch_async(dispatch_get_main_queue(), ^{
+			NSLog(@"[TapTap] Now on main thread, adding event");
+			pending_events.push_back(p_event);
+			NSLog(@"[TapTap] Event added on main thread, pending count: %d", pending_events.size());
+		});
+		return;
+	}
+	
+	NSLog(@"[TapTap] Adding event on main thread");
 	pending_events.push_back(p_event);
+	NSLog(@"[TapTap] Event added, pending count: %d", pending_events.size());
 }
 
 // SDK Initialization
@@ -586,12 +635,24 @@ void Godot3TapTap::restartApp() {
 			handler:^(UIAlertAction * _Nonnull action) {
 				exit(0);
 			}]];
-		
-		UIViewController *rootVC = [UIApplication sharedApplication].keyWindow.rootViewController;
-		[rootVC presentViewController:alert animated:YES completion:nil];
-	});
+	int count = pending_events.size();
+	NSLog(@"[TapTap] get_pending_event_count: %d", count);
+	return count;
 }
 
+Variant Godot3TapTap::pop_pending_event() {
+	NSLog(@"[TapTap] pop_pending_event called, pending count: %d", pending_events.size());
+	
+	if (pending_events.size() == 0) {
+		NSLog(@"[TapTap] WARNING: pop_pending_event called with empty queue");
+		return Variant();
+	}
+	
+	Variant front = pending_events.front()->get();
+	pending_events.pop_front();
+	
+	NSLog(@"[TapTap] Event popped, remaining count: %d", pending_events.size());
+	
 int Godot3TapTap::get_pending_event_count() {
 	return pending_events.size();
 }

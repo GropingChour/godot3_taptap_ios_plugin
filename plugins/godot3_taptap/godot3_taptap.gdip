@@ -30,3 +30,17 @@ files=[]
 
 [plist]
 TapTapDecryptKey:string_input="TapTap73sev5b6P5eZxAy2"
+CFBundleURLTypes:raw="
+<array>
+	<dict>
+		<key>CFBundleTypeRole</key>
+		<string>Editor</string>
+		<key>CFBundleURLName</key>
+		<string>taptap</string>
+		<key>CFBundleURLSchemes</key>
+		<array>
+			<string>ttwpyjvbc5f2jnqqlgfr</string>
+		</array>
+	</dict>
+</array>
+"
