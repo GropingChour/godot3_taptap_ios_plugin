@@ -206,38 +206,38 @@ typedef PoolStringArray GodotStringArray;
 					Dictionary ret;
 					ret["type"] = "login";
 					ret["result"] = "cancel";
-			NSLog(@"[TapTap] Login successful, preparing success event");
-			Dictionary ret;
-			ret["type"] = "login";
-			ret["result"] = "success";
-			ret["openId"] = String::utf8([account.userInfo.openId UTF8String] ?: "");
-			ret["unionId"] = String::utf8([account.userInfo.unionId UTF8String] ?: "");
-			ret["name"] = String::utf8([account.userInfo.name UTF8String] ?: "");
-			ret["avatar"] = String::utf8([account.userInfo.avatar UTF8String] ?: "");
-			Godot3TapTap::get_singleton()->_post_event(ret);
-			NSLog(@"[TapTap] Login success event posted");
-			
-			// Store user ID for compliance
-			self.currentUserId = account.userInfo.openId;
-			NSLog(@"[TapTap] Stored currentUserId: %@", self.currentUserId);
-		}
-		NSLog(@"[TapTap] Login handler completed");
+					Godot3TapTap::get_singleton()->_post_event(ret);
+				} else {
+					// Error occurred
+					NSLog(@"[TapTap] Login error: %@", error.localizedDescription);
+					Dictionary ret;
+					ret["type"] = "login";
+					ret["result"] = "error";
+					ret["message"] = String::utf8([error.localizedDescription UTF8String]);
+					Godot3TapTap::get_singleton()->_post_event(ret);
+				}
+			} else if (success && account && account.userInfo) {
+				// Login successful - extract profile from TapTapAccount.userInfo
+				NSLog(@"[TapTap] Login successful, preparing success event");
+				Dictionary ret;
+				ret["type"] = "login";
+				ret["result"] = "success";
+				ret["openId"] = String::utf8([account.userInfo.openId UTF8String] ?: "");
+				ret["unionId"] = String::utf8([account.userInfo.unionId UTF8String] ?: "");
+				ret["name"] = String::utf8([account.userInfo.name UTF8String] ?: "");
+				ret["avatar"] = String::utf8([account.userInfo.avatar UTF8String] ?: "");
+				Godot3TapTap::get_singleton()->_post_event(ret);
+				NSLog(@"[TapTap] Login success event posted");
+				
+				// Store user ID for compliance
+				self.currentUserId = account.userInfo.openId;
+				NSLog(@"[TapTap] Stored currentUserId: %@", self.currentUserId);
+			}
+			NSLog(@"[TapTap] Login handler completed");
 		});
 	}];
 	
-	NSLog(@"[TapTap] TapTapLogin.LoginWithScopes call returned")Dictionary ret;
-			ret["type"] = "login";
-			ret["result"] = "success";
-			ret["openId"] = String::utf8([account.userInfo.openId UTF8String] ?: "");
-			ret["unionId"] = String::utf8([account.userInfo.unionId UTF8String] ?: "");
-			ret["name"] = String::utf8([account.userInfo.name UTF8String] ?: "");
-			ret["avatar"] = String::utf8([account.userInfo.avatar UTF8String] ?: "");
-			Godot3TapTap::get_singleton()->_post_event(ret);
-			
-			// Store user ID for compliance
-			self.currentUserId = account.userInfo.openId;
-		}
-	}];
+	NSLog(@"[TapTap] TapTapLogin.LoginWithScopes call returned");
 }
 
 - (BOOL)isLoggedIn {
@@ -288,7 +288,14 @@ typedef PoolStringArray GodotStringArray;
 	}
 	
 	// Call TapTap Compliance SDK
-	[TapTapCompliancecomplianceCallbackWithCode called on thread: %@", [NSThread currentThread]);
+	[TapTapCompliance startup:userId];
+	
+	// Callback will be received via complianceCallbackWithCode:extra:
+}
+
+// TapTapComplianceDelegate method
+- (void)complianceCallbackWithCode:(TapComplianceResultHandlerCode)code extra:(NSString * _Nullable)extra {
+	NSLog(@"[TapTap] complianceCallbackWithCode called on thread: %@", [NSThread currentThread]);
 	NSLog(@"[TapTap] Compliance callback: code=%ld, extra=%@", (long)code, extra);
 	
 	// Post event on main thread
@@ -300,14 +307,7 @@ typedef PoolStringArray GodotStringArray;
 		ret["info"] = String::utf8([extra UTF8String] ?: "");
 		Godot3TapTap::get_singleton()->_post_event(ret);
 		NSLog(@"[TapTap] Compliance event posted");
-	}ceResultHandlerCode)code extra:(NSString * _Nullable)extra {
-	NSLog(@"[TapTap] Compliance callback: code=%ld, extra=%@", (long)code, extra);
-	
-	Dictionary ret;
-	ret["type"] = "compliance";
-	ret["code"] = (int)code;
-	ret["info"] = String::utf8([extra UTF8String] ?: "");
-	Godot3TapTap::get_singleton()->_post_event(ret);
+	});
 }
 
 - (void)checkLicenseWithForce:(BOOL)force {
