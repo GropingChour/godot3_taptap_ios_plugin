@@ -150,6 +150,18 @@ typedef PoolStringArray GodotStringArray;
 	NSLog(@"[TapTap] initSDKWithClientId called on thread: %@", [NSThread currentThread]);
 	NSLog(@"[TapTap] Initializing SDK with clientId: %@, enableLog: %d, withIAP: %d", clientId, enableLog, withIAP);
 	
+	// CRITICAL: TapTap SDK initialization MUST be called on main thread
+	// because it registers notification observers which causes EXC_BAD_ACCESS on background threads
+	if (![NSThread isMainThread]) {
+		NSLog(@"[TapTap] WARNING: Not on main thread, dispatching SDK init to main thread");
+		dispatch_async(dispatch_get_main_queue(), ^{
+			[self initSDKWithClientId:clientId clientToken:clientToken enableLog:enableLog withIAP:withIAP];
+		});
+		return;
+	}
+	
+	NSLog(@"[TapTap] Initializing SDK on main thread");
+	
 	// Initialize TapTap SDK
 	TapTapSdkOptions *options = [[TapTapSdkOptions alloc] init];
 	options.clientId = clientId;
@@ -161,22 +173,31 @@ typedef PoolStringArray GodotStringArray;
 	
 	_sdkInitialized = YES;
 	
-	NSLog(@"[TapTap] SDK initialized, about to post init event");
+	NSLog(@"[TapTap] SDK initialized successfully");
 	
-	// Post init success event on main thread
-	dispatch_async(dispatch_get_main_queue(), ^{
-		NSLog(@"[TapTap] Posting init event on main thread");
-		Dictionary ret;
-		ret["type"] = "init";
-		ret["result"] = "ok";
-		Godot3TapTap::get_singleton()->_post_event(ret);
-		NSLog(@"[TapTap] Init event posted");
-	});
+	// Post init success event
+	Dictionary ret;
+	ret["type"] = "init";
+	ret["result"] = "ok";
+	Godot3TapTap::get_singleton()->_post_event(ret);
+	
+	NSLog(@"[TapTap] Init event posted");
 }
 
 - (void)loginWithProfile:(BOOL)useProfile friends:(BOOL)useFriends {
 	NSLog(@"[TapTap] loginWithProfile called on thread: %@", [NSThread currentThread]);
 	NSLog(@"[TapTap] Login called with useProfile: %d, useFriends: %d", useProfile, useFriends);
+	
+	// CRITICAL: TapTap Login must be called on main thread for UI operations
+	if (![NSThread isMainThread]) {
+		NSLog(@"[TapTap] WARNING: Not on main thread, dispatching login to main thread");
+		dispatch_async(dispatch_get_main_queue(), ^{
+			[self loginWithProfile:useProfile friends:useFriends];
+		});
+		return;
+	}
+	
+	NSLog(@"[TapTap] Processing login on main thread");
 	
 	NSMutableArray *scopes = [NSMutableArray array];
 	if (useProfile) {
@@ -195,46 +216,42 @@ typedef PoolStringArray GodotStringArray;
 		NSLog(@"[TapTap] Login handler callback on thread: %@", [NSThread currentThread]);
 		NSLog(@"[TapTap] Login result: success=%d, error=%@, account=%@", success, error, account);
 		
-		// Post events on main thread
-		dispatch_async(dispatch_get_main_queue(), ^{
-			NSLog(@"[TapTap] Processing login result on main thread");
-			
-			if (error) {
-				if (error.code == 1) {
-					// User cancelled
-					NSLog(@"[TapTap] User cancelled login");
-					Dictionary ret;
-					ret["type"] = "login";
-					ret["result"] = "cancel";
-					Godot3TapTap::get_singleton()->_post_event(ret);
-				} else {
-					// Error occurred
-					NSLog(@"[TapTap] Login error: %@", error.localizedDescription);
-					Dictionary ret;
-					ret["type"] = "login";
-					ret["result"] = "error";
-					ret["message"] = String::utf8([error.localizedDescription UTF8String]);
-					Godot3TapTap::get_singleton()->_post_event(ret);
-				}
-			} else if (success && account && account.userInfo) {
-				// Login successful - extract profile from TapTapAccount.userInfo
-				NSLog(@"[TapTap] Login successful, preparing success event");
+		// Create Dictionary and post event - _post_event handles thread safety
+		if (error) {
+			if (error.code == 1) {
+				// User cancelled
+				NSLog(@"[TapTap] User cancelled login");
 				Dictionary ret;
 				ret["type"] = "login";
-				ret["result"] = "success";
-				ret["openId"] = String::utf8([account.userInfo.openId UTF8String] ?: "");
-				ret["unionId"] = String::utf8([account.userInfo.unionId UTF8String] ?: "");
-				ret["name"] = String::utf8([account.userInfo.name UTF8String] ?: "");
-				ret["avatar"] = String::utf8([account.userInfo.avatar UTF8String] ?: "");
+				ret["result"] = "cancel";
 				Godot3TapTap::get_singleton()->_post_event(ret);
-				NSLog(@"[TapTap] Login success event posted");
-				
-				// Store user ID for compliance
-				self.currentUserId = account.userInfo.openId;
-				NSLog(@"[TapTap] Stored currentUserId: %@", self.currentUserId);
+			} else {
+				// Error occurred
+				NSLog(@"[TapTap] Login error: %@", error.localizedDescription);
+				Dictionary ret;
+				ret["type"] = "login";
+				ret["result"] = "error";
+				ret["message"] = String::utf8([error.localizedDescription UTF8String]);
+				Godot3TapTap::get_singleton()->_post_event(ret);
 			}
-			NSLog(@"[TapTap] Login handler completed");
-		});
+		} else if (success && account && account.userInfo) {
+			// Login successful - extract profile from TapTapAccount.userInfo
+			NSLog(@"[TapTap] Login successful, preparing success event");
+			Dictionary ret;
+			ret["type"] = "login";
+			ret["result"] = "success";
+			ret["openId"] = String::utf8([account.userInfo.openId UTF8String] ?: "");
+			ret["unionId"] = String::utf8([account.userInfo.unionId UTF8String] ?: "");
+			ret["name"] = String::utf8([account.userInfo.name UTF8String] ?: "");
+			ret["avatar"] = String::utf8([account.userInfo.avatar UTF8String] ?: "");
+			Godot3TapTap::get_singleton()->_post_event(ret);
+			NSLog(@"[TapTap] Login success event posted");
+			
+			// Store user ID for compliance
+			self.currentUserId = account.userInfo.openId;
+			NSLog(@"[TapTap] Stored currentUserId: %@", self.currentUserId);
+		}
+		NSLog(@"[TapTap] Login handler completed");
 	}];
 	
 	NSLog(@"[TapTap] TapTapLogin.LoginWithScopes call returned");
@@ -287,6 +304,17 @@ typedef PoolStringArray GodotStringArray;
 		return;
 	}
 	
+	// CRITICAL: TapTap Compliance must be called on main thread
+	if (![NSThread isMainThread]) {
+		NSLog(@"[TapTap] WARNING: Not on main thread, dispatching compliance to main thread");
+		dispatch_async(dispatch_get_main_queue(), ^{
+			[self startComplianceWithUserId:userId];
+		});
+		return;
+	}
+	
+	NSLog(@"[TapTap] Starting compliance on main thread");
+	
 	// Call TapTap Compliance SDK
 	[TapTapCompliance startup:userId];
 	
@@ -298,16 +326,13 @@ typedef PoolStringArray GodotStringArray;
 	NSLog(@"[TapTap] complianceCallbackWithCode called on thread: %@", [NSThread currentThread]);
 	NSLog(@"[TapTap] Compliance callback: code=%ld, extra=%@", (long)code, extra);
 	
-	// Post event on main thread
-	dispatch_async(dispatch_get_main_queue(), ^{
-		NSLog(@"[TapTap] Posting compliance event on main thread");
-		Dictionary ret;
-		ret["type"] = "compliance";
-		ret["code"] = (int)code;
-		ret["info"] = String::utf8([extra UTF8String] ?: "");
-		Godot3TapTap::get_singleton()->_post_event(ret);
-		NSLog(@"[TapTap] Compliance event posted");
-	});
+	// Post event - _post_event handles thread safety
+	Dictionary ret;
+	ret["type"] = "compliance";
+	ret["code"] = (int)code;
+	ret["info"] = String::utf8([extra UTF8String] ?: "");
+	Godot3TapTap::get_singleton()->_post_event(ret);
+	NSLog(@"[TapTap] Compliance event posted");
 }
 
 - (void)checkLicenseWithForce:(BOOL)force {
@@ -454,10 +479,12 @@ void Godot3TapTap::_post_event(Variant p_event) {
 	// Ensure we're on the main thread for Godot operations
 	if (![NSThread isMainThread]) {
 		NSLog(@"[TapTap] WARNING: _post_event called from background thread, dispatching to main thread");
+		// Capture the event by value in the block
+		Variant event_copy = p_event;
 		dispatch_async(dispatch_get_main_queue(), ^{
 			NSLog(@"[TapTap] Now on main thread, adding event");
-			pending_events.push_back(p_event);
-			NSLog(@"[TapTap] Event added on main thread, pending count: %d", pending_events.size());
+			Godot3TapTap::get_singleton()->pending_events.push_back(event_copy);
+			NSLog(@"[TapTap] Event added on main thread, pending count: %d", Godot3TapTap::get_singleton()->pending_events.size());
 		});
 		return;
 	}
