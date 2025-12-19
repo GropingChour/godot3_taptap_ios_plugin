@@ -47,6 +47,11 @@ The plugin includes the following TapTap SDK frameworks (v3.x):
 - THEMISLite - Encryption library
 - Resource bundles (Login & Compliance UI)
 
+**Requirements**:
+- iOS 12.0 or later
+- Xcode 14.0 or later with Swift support
+- **Always Embed Swift Standard Libraries must be enabled** (TapTap SDK uses Swift)
+
 **Note:** iOS plugins are only effective on iOS (either on a physical device or
 in the Xcode simulator). Their singletons will *not* be available when running
 the project from the editor, so you need to export your project to test your changes.
@@ -87,6 +92,8 @@ YourProject/
 In **Project → Export → iOS**:
 - Add plugin: Check **Godot3 TapTap** in the Plugins section
 - The encryption key will be automatically merged to app's Info.plist
+- **Important**: Set **Always Embed Swift Standard Libraries = YES** in Xcode project settings
+  (The TapTap SDK requires Swift runtime support)
 
 ### 4. Usage Example
 
@@ -125,6 +132,72 @@ func _on_compliance_result(code, info):
 ## API Reference
 
 See [addons/godot3_taptap/README.md](addons/godot3_taptap/README.md) for complete API documentation.
+
+## Troubleshooting
+
+### Swift Compatibility Library Errors
+
+If you see linker errors like:
+```
+Undefined symbols for architecture arm64:
+  "__swift_FORCE_LOAD_$_swiftCompatibility50"
+  "__swift_FORCE_LOAD_$_swiftCompatibilityConcurrency"
+```
+
+**Solution**: Enable Swift support in your Xcode project:
+
+1. After exporting from Godot, open the `.xcodeproj` in Xcode
+2. Select your project target → **Build Settings** tab
+3. Search for "Always Embed Swift Standard Libraries"
+4. Set to **YES**
+5. Rebuild the project
+
+**Alternative**: Add a dummy Swift file to your project:
+1. In Xcode: **File → New → File → Swift File**
+2. Name it `Dummy.swift`, add empty content
+3. When prompted to create bridging header, click **Create**
+4. This forces Xcode to link Swift runtime libraries
+
+### Runtime Crash: "unrecognized selector sent to class"
+
+If the app crashes at startup with:
+```
+'+[TapTapEvent captureUncaughtException]: unrecognized selector sent to class'
+```
+
+**Cause**: Objective-C categories and class methods from the TapTap SDK aren't being loaded properly.
+
+**Solution**: The plugin now includes `-ObjC -all_load` linker flags in the `.gdip` file (v1.1+). If you still encounter this:
+
+1. Re-export your project with the updated plugin
+2. Or manually add in Xcode:
+   - Select your target → **Build Settings**
+   - Search for "Other Linker Flags"
+   - Add: `-ObjC -all_load`
+3. Clean build (<kbd>Cmd+Shift+K</kbd>) and retry
+
+**Note on duplicate symbols**: If `-all_load` causes "duplicate symbol" errors with other libraries, use selective force loading or `-force_load` for specific frameworks.
+
+### Token Looks Like "Garbage" in Logs
+
+If you see client token in logs as:
+```
+clientToken==j25Bb0{:qxz\^_v5q\^EOr[CUB08z3KJ8[H6...
+```
+
+**This is normal!** TapTap client tokens contain special characters (brackets, backslashes, etc.) after XOR decryption. The encryption/decryption is working correctly if:
+- No "Failed to decrypt" errors appear
+- SDK initialization succeeds
+- Login works properly
+
+The "garbage-looking" characters are valid token data, not a decryption error.
+
+### Plugin Not Found
+
+If `Engine.get_singleton("Godot3TapTap")` returns `null`:
+- Verify plugin is checked in **Project → Export → iOS → Plugins**
+- Ensure `ios/plugins/godot3_taptap/` directory exists with all files
+- Plugins only work in exported builds, not in Godot editor
 
 ## Development & Building
 
