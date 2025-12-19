@@ -1,0 +1,33 @@
+# Dependabot configuration for keeping GitHub Actions up to date
+version: 2
+updates:
+  # Monitor GitHub Actions
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    commit-message:
+      prefix: "ci"
+      include: "scope"
+    reviewers:
+      - "GropingChour"
+    labels:
+      - "dependencies"
+      - "github-actions"
+    open-pull-requests-limit: 5
+
+  # Monitor Git submodules (Godot engine)
+  - package-ecosystem: "gitsubmodule"
+    directory: "/"
+    schedule:
+      interval: "monthly"
+    commit-message:
+      prefix: "chore"
+      include: "scope"
+    reviewers:
+      - "GropingChour"
+    labels:
+      - "dependencies"
+      - "submodules"
+    open-pull-requests-limit: 2

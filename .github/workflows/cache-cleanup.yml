@@ -1,0 +1,56 @@
+name: Cache Cleanup
+
+on:
+  schedule:
+    # Run weekly on Sunday at 00:00 UTC
+    - cron: '0 0 * * 0'
+  workflow_dispatch:  # Allow manual trigger
+
+jobs:
+  cleanup:
+    name: Clean Old Caches
+    runs-on: ubuntu-latest
+    
+    permissions:
+      actions: write
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Cleanup old caches
+        run: |
+          echo "Cleaning up old GitHub Actions caches..."
+          
+          # Get cache list
+          gh extension install actions/gh-actions-cache
+          
+          # Delete caches older than 7 days
+          gh actions-cache list --key "scons" --limit 100 | \
+            while read line; do
+              cacheKey=$(echo $line | awk '{print $1}')
+              cacheDate=$(echo $line | awk '{print $3}')
+              echo "Found cache: $cacheKey from $cacheDate"
+              
+              # Delete if older than 7 days
+              if [[ $(date -d "$cacheDate" +%s) -lt $(date -d '7 days ago' +%s) ]]; then
+                echo "Deleting old cache: $cacheKey"
+                gh actions-cache delete "$cacheKey" --confirm || true
+              fi
+            done
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Summary
+        run: |
+          echo "### Cache Cleanup Complete :broom:" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Removed caches older than 7 days" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Current active caches:" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          gh actions-cache list --limit 10 >> $GITHUB_STEP_SUMMARY || echo "No caches found" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
