@@ -1,50 +1,20 @@
 /*************************************************************************/
-/*  godot3_taptap.mm                                                     */
+/*  godot3_taptap.mm - 简洁版本                                         */
 /*************************************************************************/
-/*                       This file is part of:                           */
-/*                           GODOT ENGINE                                */
-/*                      https://godotengine.org                          */
-/*************************************************************************/
-/* Copyright (c) 2007-2021 Juan Linietsky, Ariel Manzur.                 */
-/* Copyright (c) 2014-2021 Godot Engine contributors (cf. AUTHORS.md).   */
-/*                                                                       */
-/* Permission is hereby granted, free of charge, to any person obtaining */
-/* a copy of this software and associated documentation files (the       */
-/* "Software"), to deal in the Software without restriction, including   */
-/* without limitation the rights to use, copy, modify, merge, publish,   */
-/* distribute, sublicense, and/or sell copies of the Software, and to    */
-/* permit persons to whom the Software is furnished to do so, subject to */
-/* the following conditions:                                             */
-/*                                                                       */
-/* The above copyright notice and this permission notice shall be        */
-/* included in all copies or substantial portions of the Software.       */
-/*                                                                       */
-/* THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,       */
-/* EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF    */
-/* MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.*/
-/* IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY  */
-/* CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,  */
-/* TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE     */
-/* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                */
+/* 参考 Android 版本实现和官方 iOS 插件模式                              */
 /*************************************************************************/
 
 #include "godot3_taptap.h"
 
 #if VERSION_MAJOR == 4
 #import "platform/ios/app_delegate.h"
-#import "platform/ios/view_controller.h"
 #include "core/io/json.h"
 #else
 #import "platform/iphone/app_delegate.h"
-#import "platform/iphone/view_controller.h"
 #include "core/io/json.h"
 #endif
 
 #import <Foundation/Foundation.h>
-#import <objc/runtime.h>  // Required for runtime method injection
-#import <CommonCrypto/CommonDigest.h>  // Required for SHA256 hashing
-
-// TapTap SDK Headers
 #import <TapTapLoginSDK/TapTapLoginSDK.h>
 #import <TapTapComplianceSDK/TapTapComplianceSDK.h>
 #import <TapTapCoreSDK/TapTapCoreSDK.h>
@@ -55,501 +25,22 @@ typedef PackedStringArray GodotStringArray;
 typedef PoolStringArray GodotStringArray;
 #endif
 
-// MARK: - Runtime Fix for Missing SDK Methods
-
-/**
- * @brief Runtime method injector to fix missing TapTap SDK methods
- * 
- * Problem: TapTap SDK expects certain methods to exist on system classes:
- * 1. TapTapEvent class missing +captureUncaughtException class method
- * 2. NSMutableURLRequest missing -generateSHA256SignatureWithSecret: instance method
- * 
- * These missing methods cause crashes with "unrecognized selector" errors.
- * 
- * Solution: Use Objective-C runtime to inject stub implementations before SDK runs.
- * This is done in +load which runs automatically before main().
- * 
- * Technical Details:
- * - Class methods are stored in the metaclass (use object_getClass)
- * - Instance methods are stored in the class itself
- * - +load is called automatically during class loading
- * - Injections are transparent to the SDK
- */
-@interface TapTapSDKMethodInjector : NSObject
-+ (void)injectMissingMethods;
-+ (void)injectTapTapEventMethods;
-+ (void)injectNSURLRequestMethods;
-+ (void)hookAppDelegateURLMethods;
-@end
-
-@implementation TapTapSDKMethodInjector
-
-/**
- * @brief Automatically called by Objective-C runtime before main()
- * 
- * The +load method is guaranteed to be called exactly once per class,
- * during the initial loading of the class into the runtime, before any
- * instances are created or any other methods are called.
- */
-+ (void)load {
-	NSLog(@"[TapTap Fix] +load called, injecting missing SDK methods");
-	[self injectMissingMethods];
-}
-
-/**
- * @brief Master method to inject all missing SDK methods
- * 
- * Calls individual injection methods for different classes.
- */
-+ (void)injectMissingMethods {
-	[self injectTapTapEventMethods];
-	[self injectNSURLRequestMethods];
-	[self hookAppDelegateURLMethods];
-}
-
-/**
- * @brief Injects missing TapTapEvent class methods
- * 
- * Fixes: +[TapTapEvent captureUncaughtException]
- */
-+ (void)injectTapTapEventMethods {
-	NSLog(@"[TapTap Fix] === Injecting TapTapEvent Methods ===");
-	
-	// Step 1: Check if TapTapEvent class exists
-	Class eventClass = NSClassFromString(@"TapTapEvent");
-	if (!eventClass) {
-		NSLog(@"[TapTap Fix] TapTapEvent class not found (SDK not loaded yet)");
-		return;
-	}
-	
-	NSLog(@"[TapTap Fix] TapTapEvent class found: %@", eventClass);
-	
-	// Step 2: Check if captureUncaughtException method exists
-	SEL missingSelector = @selector(captureUncaughtException);
-	Method existingMethod = class_getClassMethod(eventClass, missingSelector);
-	
-	if (existingMethod) {
-		NSLog(@"[TapTap Fix] +[TapTapEvent captureUncaughtException] already exists");
-		return;
-	}
-	
-	NSLog(@"[TapTap Fix] +[TapTapEvent captureUncaughtException] is MISSING");
-	NSLog(@"[TapTap Fix] Injecting stub implementation...");
-	
-	// Step 3: Create no-op stub
-	IMP stubImplementation = imp_implementationWithBlock(^(id self) {
-		NSLog(@"[TapTap Fix] Stub +[TapTapEvent captureUncaughtException] called (no-op)");
-	});
-	
-	// Step 4: Inject into metaclass (for class methods)
-	Class metaClass = object_getClass(eventClass);
-	BOOL added = class_addMethod(metaClass, missingSelector, stubImplementation, "v@:");
-	
-	if (added) {
-		NSLog(@"[TapTap Fix] ✅ Successfully injected +[TapTapEvent captureUncaughtException]");
-		if ([eventClass respondsToSelector:missingSelector]) {
-			NSLog(@"[TapTap Fix] ✅ Verification passed");
-		}
-	} else {
-		NSLog(@"[TapTap Fix] ❌ Failed to inject method");
-	}
-}
-
-/**
- * @brief Injects missing NSMutableURLRequest instance methods
- * 
- * Fixes: -[NSMutableURLRequest generateSHA256SignatureWithSecret:]
- * 
- * This method is used by TapTap SDK to generate request signatures.
- * We inject a stub that returns an empty string to prevent crashes.
- */
-+ (void)injectNSURLRequestMethods {
-	NSLog(@"[TapTap Fix] === Injecting NSMutableURLRequest Methods ===");
-	
-	Class urlRequestClass = [NSMutableURLRequest class];
-	if (!urlRequestClass) {
-		NSLog(@"[TapTap Fix] NSMutableURLRequest class not found (should never happen)");
-		return;
-	}
-	
-	NSLog(@"[TapTap Fix] NSMutableURLRequest class found: %@", urlRequestClass);
-	
-	// Check if generateSHA256SignatureWithSecret: method exists
-	SEL missingSelector = @selector(generateSHA256SignatureWithSecret:);
-	Method existingMethod = class_getInstanceMethod(urlRequestClass, missingSelector);
-	
-	if (existingMethod) {
-		NSLog(@"[TapTap Fix] -[NSMutableURLRequest generateSHA256SignatureWithSecret:] already exists");
-		return;
-	}
-	
-	NSLog(@"[TapTap Fix] -[NSMutableURLRequest generateSHA256SignatureWithSecret:] is MISSING");
-	NSLog(@"[TapTap Fix] Injecting stub implementation...");
-	
-	// Create SHA256 signature implementation with full call stack logging
-	// Signature: id (return), id (self), SEL (_cmd), id (secret parameter)
-	IMP stubImplementation = imp_implementationWithBlock(^NSString*(NSMutableURLRequest *self, NSString *secret) {
-		NSLog(@"[TapTap Fix] ========================================");
-		NSLog(@"[TapTap Fix] generateSHA256SignatureWithSecret: CALLED");
-		NSLog(@"[TapTap Fix] ========================================");
-		
-		// Print detailed call stack to identify which SDK module is calling this
-		NSArray<NSString *> *callStack = [NSThread callStackSymbols];
-		NSLog(@"[TapTap Fix] 📍 CALL STACK (Total: %lu frames):", (unsigned long)callStack.count);
-		for (NSUInteger i = 0; i < MIN(20, callStack.count); i++) {
-			NSString *frame = callStack[i];
-			// Highlight TapTap SDK frames
-			if ([frame containsString:@"TapTap"] || [frame containsString:@"TapSDK"]) {
-				NSLog(@"[TapTap Fix]   🔴 %2lu: %@", (unsigned long)i, frame);
-			} else {
-				NSLog(@"[TapTap Fix]   %2lu: %@", (unsigned long)i, frame);
-			}
-		}
-		
-		// Print request details
-		NSLog(@"[TapTap Fix] ========================================");
-		NSLog(@"[TapTap Fix] 📡 REQUEST DETAILS:");
-		NSLog(@"[TapTap Fix]   Method: %@", self.HTTPMethod ?: @"(null)");
-		NSLog(@"[TapTap Fix]   URL: %@", self.URL.absoluteString ?: @"(null)");
-		NSLog(@"[TapTap Fix]   Host: %@", self.URL.host ?: @"(null)");
-		NSLog(@"[TapTap Fix]   Path: %@", self.URL.path ?: @"(null)");
-		NSLog(@"[TapTap Fix]   Query: %@", self.URL.query ?: @"(null)");
-		NSLog(@"[TapTap Fix]   Body length: %lu bytes", (unsigned long)(self.HTTPBody.length));
-		NSLog(@"[TapTap Fix]   Secret provided: %@", secret ? @"YES" : @"NO");
-		if (secret) {
-			NSLog(@"[TapTap Fix]   Secret length: %lu", (unsigned long)secret.length);
-		}
-		NSLog(@"[TapTap Fix] ========================================");
-		
-		if (!secret || secret.length == 0) {
-			NSLog(@"[TapTap Fix] ⚠️  No secret provided, returning empty signature");
-			return @"";
-		}
-		
-		// Build signature input from request components
-		NSMutableString *signatureInput = [NSMutableString string];
-		
-		// 1. Add HTTP method
-		[signatureInput appendString:self.HTTPMethod ?: @"GET"];
-		[signatureInput appendString:@"\n"];
-		
-		// 2. Add URL path
-		NSString *path = self.URL.path ?: @"/";
-		[signatureInput appendString:path];
-		[signatureInput appendString:@"\n"];
-		
-		// 3. Add query string (sorted)
-		NSString *query = self.URL.query ?: @"";
-		[signatureInput appendString:query];
-		[signatureInput appendString:@"\n"];
-		
-		// 4. Add body if exists
-		if (self.HTTPBody && self.HTTPBody.length > 0) {
-			NSString *bodyString = [[NSString alloc] initWithData:self.HTTPBody encoding:NSUTF8StringEncoding];
-			if (bodyString) {
-				[signatureInput appendString:bodyString];
-			}
-		}
-		[signatureInput appendString:@"\n"];
-		
-		// 5. Add secret
-		[signatureInput appendString:secret];
-		
-		NSLog(@"[TapTap Fix] Signature input length: %lu", (unsigned long)signatureInput.length);
-		
-		// Generate SHA256 hash
-		NSData *data = [signatureInput dataUsingEncoding:NSUTF8StringEncoding];
-		unsigned char hash[CC_SHA256_DIGEST_LENGTH];
-		CC_SHA256(data.bytes, (CC_LONG)data.length, hash);
-		
-		// Convert to hex string
-		NSMutableString *hexString = [NSMutableString stringWithCapacity:CC_SHA256_DIGEST_LENGTH * 2];
-		for (int i = 0; i < CC_SHA256_DIGEST_LENGTH; i++) {
-			[hexString appendFormat:@"%02x", hash[i]];
-		}
-		
-		NSLog(@"[TapTap Fix] ✅ Generated SHA256 signature: %@", hexString);
-		NSLog(@"[TapTap Fix] ========================================");
-		return hexString;
-	});
-	
-	// Inject into class (for instance methods, not metaclass)
-	// Signature: "@@:@" means: NSString* return, id self, SEL _cmd, NSString* parameter
-	BOOL added = class_addMethod(urlRequestClass, 
-								  missingSelector, 
-								  stubImplementation, 
-								  "@@:@");
-	
-	if (added) {
-		NSLog(@"[TapTap Fix] ✅ Successfully injected -[NSMutableURLRequest generateSHA256SignatureWithSecret:]");
-		
-		// Verify injection
-		NSMutableURLRequest *testRequest = [[NSMutableURLRequest alloc] init];
-		if ([testRequest respondsToSelector:missingSelector]) {
-			NSLog(@"[TapTap Fix] ✅ Verification: Method is now callable");
-		} else {
-			NSLog(@"[TapTap Fix] ⚠️  WARNING: Verification failed!");
-		}
-	} else {
-		NSLog(@"[TapTap Fix] ❌ Failed to inject method");
-	}
-}
-
-/**
- * @brief Hook AppDelegate URL handling methods for TapTap Login
- * 
- * TapTap Login requires URL Scheme callbacks to complete OAuth flow.
- * Instead of modifying Godot's app_delegate.mm source code, we use
- * Method Swizzling to inject TapTap URL handling into AppDelegate.
- * 
- * This hooks three methods:
- * 1. application:openURL:options: - iOS 9+ URL Scheme handler
- * 2. scene:openURLContexts: - iOS 13+ multi-window URL Scheme handler
- * 3. application:continueUserActivity:restorationHandler: - Universal Links
- * 
- * Technical approach:
- * - Original method is renamed to xxx_original
- * - New method calls [TapTapLogin openWithUrl:] first
- * - If TapTap doesn't handle it, calls original implementation
- * - This ensures compatibility with other plugins/Godot features
- */
-+ (void)hookAppDelegateURLMethods {
-	NSLog(@"[TapTap Fix] === Hooking AppDelegate URL Methods ===");
-	
-	// Get AppDelegate class
-	Class appDelegateClass = NSClassFromString(@"AppDelegate");
-	if (!appDelegateClass) {
-		NSLog(@"[TapTap Fix] ❌ AppDelegate class not found");
-		return;
-	}
-	
-	NSLog(@"[TapTap Fix] AppDelegate class found: %@", appDelegateClass);
-	
-	// === Hook 1: application:openURL:options: (iOS 9+) ===
-	SEL openURLSelector = @selector(application:openURL:options:);
-	Method originalOpenURL = class_getInstanceMethod(appDelegateClass, openURLSelector);
-	
-	if (originalOpenURL) {
-		NSLog(@"[TapTap Fix] Hooking application:openURL:options:");
-		
-		// Create swizzled implementation
-		IMP swizzledOpenURL = imp_implementationWithBlock(^BOOL(id self, UIApplication *app, NSURL *url, NSDictionary *options) {
-			NSLog(@"[TapTap Plugin] *** URL Scheme callback received ***");
-			NSLog(@"[TapTap Plugin] URL: %@", url);
-			NSLog(@"[TapTap Plugin] Scheme: %@", url.scheme);
-			
-			// Try TapTap SDK first (using official API)
-			BOOL handledByTapTap = [TapTapLogin openWithUrl:url];
-			
-			if (handledByTapTap) {
-				NSLog(@"[TapTap Plugin] ✅ URL handled by TapTap Login SDK");
-				return YES;
-			}
-			
-			NSLog(@"[TapTap Plugin] URL not for TapTap, checking original handler");
-			
-			// Call original implementation if exists
-			SEL originalSelector = NSSelectorFromString(@"application:openURL:options:_original");
-			if ([self respondsToSelector:originalSelector]) {
-				NSLog(@"[TapTap Plugin] Calling original openURL handler");
-				// Get original method implementation
-				Method origMethod = class_getInstanceMethod([self class], originalSelector);
-				if (origMethod) {
-					typedef BOOL (*OriginalFunc)(id, SEL, UIApplication*, NSURL*, NSDictionary*);
-					OriginalFunc originalImp = (OriginalFunc)method_getImplementation(origMethod);
-					return originalImp(self, originalSelector, app, url, options);
-				}
-			}
-			
-			NSLog(@"[TapTap Plugin] No original handler, returning NO");
-			return NO;
-		});
-		
-		// Rename original method to xxx_original
-		SEL originalSelector = NSSelectorFromString(@"application:openURL:options:_original");
-		class_addMethod(appDelegateClass, originalSelector, 
-						method_getImplementation(originalOpenURL), 
-						method_getTypeEncoding(originalOpenURL));
-		
-		// Replace original with swizzled
-		method_setImplementation(originalOpenURL, swizzledOpenURL);
-		
-		NSLog(@"[TapTap Fix] ✅ Successfully hooked application:openURL:options:");
-	} else {
-		NSLog(@"[TapTap Fix] application:openURL:options: not found in AppDelegate");
-		NSLog(@"[TapTap Fix] Adding new implementation");
-		
-		// If method doesn't exist, add it
-		IMP newOpenURL = imp_implementationWithBlock(^BOOL(id self, UIApplication *app, NSURL *url, NSDictionary *options) {
-			NSLog(@"[TapTap Plugin] *** URL Scheme callback (new method) ***");
-			NSLog(@"[TapTap Plugin] URL: %@", url);
-			
-			BOOL handled = [TapTapLogin openWithUrl:url];
-			
-			if (handled) {
-				NSLog(@"[TapTap Plugin] ✅ URL handled by TapTap SDK");
-			}
-			
-			return handled;
-		});
-		
-		class_addMethod(appDelegateClass, openURLSelector, newOpenURL, "B@:@@@");
-		NSLog(@"[TapTap Fix] ✅ Added application:openURL:options: to AppDelegate");
-	}
-	
-	// === Hook 2: scene:openURLContexts: (iOS 13+) ===
-	if (@available(iOS 13.0, *)) {
-		SEL sceneOpenURLSelector = @selector(scene:openURLContexts:);
-		Method originalSceneOpenURL = class_getInstanceMethod(appDelegateClass, sceneOpenURLSelector);
-		
-		if (originalSceneOpenURL) {
-			NSLog(@"[TapTap Fix] Hooking scene:openURLContexts: (iOS 13+)");
-			
-			IMP swizzledSceneOpenURL = imp_implementationWithBlock(^void(id self, UIScene *scene, NSSet<UIOpenURLContext *> *URLContexts) {
-				NSLog(@"[TapTap Plugin] *** scene:openURLContexts called (iOS 13+) ***");
-				
-				for (UIOpenURLContext *context in URLContexts) {
-					NSURL *url = context.URL;
-					NSLog(@"[TapTap Plugin] Processing URL: %@", url);
-					
-					BOOL handled = [TapTapLogin openWithUrl:url];
-					
-					if (handled) {
-						NSLog(@"[TapTap Plugin] ✅ URL handled by TapTap SDK");
-						continue; // TapTap handled it, move to next URL
-					}
-				}
-				
-				// Call original implementation
-				SEL originalSelector = NSSelectorFromString(@"scene:openURLContexts:_original");
-				if ([self respondsToSelector:originalSelector]) {
-					Method origMethod = class_getInstanceMethod([self class], originalSelector);
-					if (origMethod) {
-						typedef void (*OriginalFunc)(id, SEL, UIScene*, NSSet*);
-						OriginalFunc originalImp = (OriginalFunc)method_getImplementation(origMethod);
-						originalImp(self, originalSelector, scene, URLContexts);
-					}
-				}
-			});
-			
-			SEL originalSelector = NSSelectorFromString(@"scene:openURLContexts:_original");
-			class_addMethod(appDelegateClass, originalSelector,
-							method_getImplementation(originalSceneOpenURL),
-							method_getTypeEncoding(originalSceneOpenURL));
-			
-			method_setImplementation(originalSceneOpenURL, swizzledSceneOpenURL);
-			
-			NSLog(@"[TapTap Fix] ✅ Successfully hooked scene:openURLContexts:");
-		} else {
-			NSLog(@"[TapTap Fix] scene:openURLContexts: not found, adding new implementation");
-			
-			IMP newSceneOpenURL = imp_implementationWithBlock(^void(id self, UIScene *scene, NSSet<UIOpenURLContext *> *URLContexts) {
-				NSLog(@"[TapTap Plugin] *** scene:openURLContexts (new method) ***");
-				
-				for (UIOpenURLContext *context in URLContexts) {
-					NSURL *url = context.URL;
-					NSLog(@"[TapTap Plugin] URL: %@", url);
-					[TapTapLogin openWithUrl:url];
-				}
-			});
-			
-			class_addMethod(appDelegateClass, sceneOpenURLSelector, newSceneOpenURL, "v@:@@");
-			NSLog(@"[TapTap Fix] ✅ Added scene:openURLContexts: to AppDelegate");
-		}
-	}
-	
-	// === Hook 3: Universal Links ===
-	SEL continueActivitySelector = @selector(application:continueUserActivity:restorationHandler:);
-	Method originalContinueActivity = class_getInstanceMethod(appDelegateClass, continueActivitySelector);
-	
-	if (originalContinueActivity) {
-		NSLog(@"[TapTap Fix] Hooking application:continueUserActivity:restorationHandler:");
-		
-		IMP swizzledContinueActivity = imp_implementationWithBlock(^BOOL(id self, UIApplication *app, NSUserActivity *userActivity, void(^restorationHandler)(NSArray *)) {
-			
-			if ([userActivity.activityType isEqualToString:NSUserActivityTypeBrowsingWeb]) {
-				NSURL *url = userActivity.webpageURL;
-				NSLog(@"[TapTap Plugin] *** Universal Link received ***");
-				NSLog(@"[TapTap Plugin] URL: %@", url);
-				
-				BOOL handled = [TapTapLogin openWithUrl:url];
-				
-				if (handled) {
-					NSLog(@"[TapTap Plugin] ✅ Universal Link handled by TapTap SDK");
-					return YES;
-				}
-			}
-			
-			// Call original implementation
-			SEL originalSelector = NSSelectorFromString(@"application:continueUserActivity:restorationHandler:_original");
-			if ([self respondsToSelector:originalSelector]) {
-				Method origMethod = class_getInstanceMethod([self class], originalSelector);
-				if (origMethod) {
-					typedef BOOL (*OriginalFunc)(id, SEL, UIApplication*, NSUserActivity*, void(^)(NSArray*));
-					OriginalFunc originalImp = (OriginalFunc)method_getImplementation(origMethod);
-					return originalImp(self, originalSelector, app, userActivity, restorationHandler);
-				}
-			}
-			
-			return NO;
-		});
-		
-		SEL originalSelector = NSSelectorFromString(@"application:continueUserActivity:restorationHandler:_original");
-		class_addMethod(appDelegateClass, originalSelector,
-						method_getImplementation(originalContinueActivity),
-						method_getTypeEncoding(originalContinueActivity));
-		
-		method_setImplementation(originalContinueActivity, swizzledContinueActivity);
-		
-		NSLog(@"[TapTap Fix] ✅ Successfully hooked continueUserActivity");
-	} else {
-		NSLog(@"[TapTap Fix] continueUserActivity not found, adding new implementation");
-		
-		IMP newContinueActivity = imp_implementationWithBlock(^BOOL(id self, UIApplication *app, NSUserActivity *userActivity, void(^restorationHandler)(NSArray *)) {
-			
-			if ([userActivity.activityType isEqualToString:NSUserActivityTypeBrowsingWeb]) {
-				NSURL *url = userActivity.webpageURL;
-				NSLog(@"[TapTap Plugin] *** Universal Link (new method) ***");
-				NSLog(@"[TapTap Plugin] URL: %@", url);
-				
-				return [TapTapLogin openWithUrl:url];
-			}
-			
-			return NO;
-		});
-		
-		class_addMethod(appDelegateClass, continueActivitySelector, newContinueActivity, "B@:@@?");
-		NSLog(@"[TapTap Fix] ✅ Added continueUserActivity to AppDelegate");
-	}
-	
-	NSLog(@"[TapTap Fix] ========================================");
-	NSLog(@"[TapTap Fix] ✅ AppDelegate URL hooks installed");
-	NSLog(@"[TapTap Fix] TapTap Login URL callbacks will work");
-	NSLog(@"[TapTap Fix] ========================================");
-}
-
-@end
-
-// MARK: - Objective-C Delegate for TapTap SDK callbacks
+// MARK: - Objective-C Delegate
 
 @interface GodotTapTapDelegate : NSObject <TapTapComplianceDelegate>
 
 @property(nonatomic, strong) NSString *clientId;
 @property(nonatomic, strong) NSString *clientToken;
 @property(nonatomic, assign) BOOL sdkInitialized;
-@property(nonatomic, strong) NSString *currentUserId;
 
 - (NSString *)getDecryptKey;
 - (NSString *)decryptToken:(NSString *)encryptedToken;
-- (void)initSDKWithClientId:(NSString *)clientId clientToken:(NSString *)clientToken enableLog:(BOOL)enableLog withIAP:(BOOL)withIAP;
+- (void)initSDKWithClientId:(NSString *)clientId clientToken:(NSString *)clientToken enableLog:(BOOL)enableLog;
 - (void)loginWithProfile:(BOOL)useProfile friends:(BOOL)useFriends;
 - (BOOL)isLoggedIn;
 - (NSDictionary *)getUserProfile;
 - (void)logout;
 - (void)startComplianceWithUserId:(NSString *)userId;
-- (void)checkLicenseWithForce:(BOOL)force;
-- (void)queryDLCWithSkuIds:(NSArray *)skuIds;
-- (void)purchaseDLCWithSkuId:(NSString *)skuId;
 
 @end
 
@@ -559,44 +50,24 @@ typedef PoolStringArray GodotStringArray;
 	self = [super init];
 	if (self) {
 		_sdkInitialized = NO;
-		_currentUserId = nil;
-		// Register as compliance delegate
 		[TapTapCompliance registerComplianceDelegate:self];
 	}
 	return self;
 }
 
 - (NSString *)getDecryptKey {
-	// Try to read from Info.plist first
 	NSDictionary *infoPlist = [[NSBundle mainBundle] infoDictionary];
 	NSString *key = [infoPlist objectForKey:@"TapTapDecryptKey"];
-	
-	if (key && key.length > 0) {
-		NSLog(@"[TapTap] Using decrypt key from Info.plist");
-		return key;
-	}
-	
-	// Fallback to default key (same as Android)
-	NSLog(@"[TapTap] Using default decrypt key");
-	return @"TapTapz9mdoNZSItSxJOvG";
+	return key ?: @"TapTapz9mdoNZSItSxJOvG";
 }
 
 - (NSString *)decryptToken:(NSString *)encryptedToken {
-	if (!encryptedToken || encryptedToken.length == 0) {
-		NSLog(@"[TapTap] Empty encrypted token");
-		return @"";
-	}
+	if (!encryptedToken || encryptedToken.length == 0) return @"";
 	
 	NSString *decryptKey = [self getDecryptKey];
-	
-	// Base64 decode
 	NSData *encryptedData = [[NSData alloc] initWithBase64EncodedString:encryptedToken options:0];
-	if (!encryptedData) {
-		NSLog(@"[TapTap] Failed to decode Base64 token");
-		return @"";
-	}
+	if (!encryptedData) return @"";
 	
-	// XOR decryption
 	NSData *keyData = [decryptKey dataUsingEncoding:NSUTF8StringEncoding];
 	NSMutableData *decryptedData = [NSMutableData dataWithLength:encryptedData.length];
 	
@@ -604,334 +75,102 @@ typedef PoolStringArray GodotStringArray;
 	const uint8_t *keyBytes = (const uint8_t *)[keyData bytes];
 	uint8_t *decBytes = (uint8_t *)[decryptedData mutableBytes];
 	
-	// XOR decrypt each byte
 	for (NSUInteger i = 0; i < encryptedData.length; i++) {
 		decBytes[i] = encBytes[i] ^ keyBytes[i % keyData.length];
 	}
 	
-	NSString *decryptedToken = [[NSString alloc] initWithData:decryptedData encoding:NSUTF8StringEncoding];
-	
-	if (!decryptedToken) {
-		NSLog(@"[TapTap] Failed to convert decrypted data to UTF-8 string");
-		return @"";
-	}
-	
-	NSLog(@"[TapTap] Token decrypted successfully (length: %lu)", (unsigned long)decryptedToken.length);
-	return decryptedToken;
+	return [[NSString alloc] initWithData:decryptedData encoding:NSUTF8StringEncoding] ?: @"";
 }
 
-/**
- * @brief Initialize TapTap SDK with client credentials
- * 
- * @param clientId TapTap application client ID
- * @param clientToken TapTap application client token (plaintext)
- * @param enableLog Enable SDK debug logging
- * @param withIAP Enable In-App Purchase features (not supported on iOS)
- * 
- * CRITICAL: This method MUST be called on the main thread because:
- * 1. TapTap SDK registers notification observers that require main thread
- * 2. SDK may perform UI operations during initialization
- * 3. Thread safety is ensured at C++ layer before calling this method
- * 
- * The method includes comprehensive logging and error handling to diagnose
- * initialization issues, especially the missing captureUncaughtException method.
- */
-- (void)initSDKWithClientId:(NSString *)clientId clientToken:(NSString *)clientToken enableLog:(BOOL)enableLog withIAP:(BOOL)withIAP {
-	_clientId = clientId;
-	_clientToken = clientToken;
-	
-	// === Initialization Start - Log Configuration ===
-	NSLog(@"[TapTap ObjC] ========================================");
-	NSLog(@"[TapTap ObjC] SDK Initialization Start");
-	NSLog(@"[TapTap ObjC] ========================================");
-	NSLog(@"[TapTap ObjC] Thread: %@", [NSThread currentThread]);
-	NSLog(@"[TapTap ObjC] Main thread: %d (MUST be 1)", [NSThread isMainThread]);
-	NSLog(@"[TapTap ObjC] Client ID: %@", clientId);
-	NSLog(@"[TapTap ObjC] Enable log: %d", enableLog);
-	NSLog(@"[TapTap ObjC] With IAP: %d (ignored on iOS)", withIAP);
-	
-	// === Thread Safety Check ===
-	// If not on main thread, abort immediately to prevent crashes
-	if (![NSThread isMainThread]) {
-		NSLog(@"[TapTap ObjC] ❌ FATAL ERROR: Not on main thread!");
-		NSLog(@"[TapTap ObjC] TapTap SDK initialization MUST run on main thread");
-		NSLog(@"[TapTap ObjC] Call stack:");
-		for (NSString *frame in [NSThread callStackSymbols]) {
-			NSLog(@"[TapTap ObjC]   %@", frame);
-		}
-		
-		// Post error event to GDScript
-		Dictionary ret;
-		ret["type"] = "init";
-		ret["result"] = "error";
-		ret["message"] = "SDK initialization called from background thread";
-		Godot3TapTap::get_singleton()->_post_event(ret);
-		return;
-	}
-	
-	// === Verify Runtime Method Injection ===
-	// Check if our +load method successfully injected the missing method
-	Class eventClass = NSClassFromString(@"TapTapEvent");
-	if (eventClass) {
-		NSLog(@"[TapTap ObjC] Checking TapTapEvent class: %@", eventClass);
-		
-		SEL targetSelector = @selector(captureUncaughtException);
-		if ([eventClass respondsToSelector:targetSelector]) {
-			NSLog(@"[TapTap ObjC] ✅ captureUncaughtException is available (injected by runtime fix)");
-		} else {
-			NSLog(@"[TapTap ObjC] ⚠️  WARNING: captureUncaughtException STILL missing!");
-			NSLog(@"[TapTap ObjC] Runtime injection may have failed. SDK may crash during init.");
-		}
-	} else {
-		NSLog(@"[TapTap ObjC] TapTapEvent class not found (SDK might initialize it later)");
-	}
-	
-	// === Create SDK Options ===
-	NSLog(@"[TapTap ObjC] Creating TapTapSdkOptions...");
-	TapTapSdkOptions *options = [[TapTapSdkOptions alloc] init];
-	
-	if (!options) {
-		NSLog(@"[TapTap ObjC] ❌ Failed to allocate TapTapSdkOptions!");
-		Dictionary ret;
-		ret["type"] = "init";
-		ret["result"] = "error";
-		ret["message"] = "Failed to create SDK options object";
-		Godot3TapTap::get_singleton()->_post_event(ret);
-		return;
-	}
-	
-	// Configure basic options
-	options.clientId = clientId;
-	options.clientToken = clientToken;
-	options.region = TapTapRegionTypeCN;  // China region
-	options.enableLog = enableLog;
-	
-	// === CRITICAL: Print final token being passed to SDK ===
-	NSLog(@"[TapTap ObjC] ========================================");
-	NSLog(@"[TapTap ObjC] *** FINAL TOKEN VERIFICATION ***");
-	NSLog(@"[TapTap ObjC] ⚠️  WARNING: Full token logged for debugging");
-	NSLog(@"[TapTap ObjC] ⚠️  REMOVE THIS LOG IN PRODUCTION BUILD");
-	NSLog(@"[TapTap ObjC] Client ID: %@", clientId);
-	NSLog(@"[TapTap ObjC] Client ID length: %lu", (unsigned long)clientId.length);
-	NSLog(@"[TapTap ObjC] Client Token: %@", clientToken);
-	NSLog(@"[TapTap ObjC] Client Token length: %lu", (unsigned long)clientToken.length);
-	NSLog(@"[TapTap ObjC] Token first 10 chars: %@", [clientToken substringToIndex:MIN(10, clientToken.length)]);
-	NSLog(@"[TapTap ObjC] Token last 10 chars: %@", [clientToken substringFromIndex:MAX(0, (NSInteger)clientToken.length - 10)]);
-	NSLog(@"[TapTap ObjC] ========================================");
-	
-	NSLog(@"[TapTap ObjC] Basic options configured");
-	
-	// === Attempt to Disable Crash Reporting (Defense in Depth) ===
-	// Even with runtime injection, try to disable crash handlers as backup
-	NSLog(@"[TapTap ObjC] Attempting to disable SDK crash reporting...");
-	
-	@try {
-		// Method 1: enableAutoReport property
-		if ([options respondsToSelector:@selector(setEnableAutoReport:)]) {
-			[options setValue:@NO forKey:@"enableAutoReport"];
-			NSLog(@"[TapTap ObjC]   ✓ Disabled via enableAutoReport");
-		} else {
-			NSLog(@"[TapTap ObjC]   ✗ enableAutoReport not available");
-		}
-		
-		// Method 2: TapTapEventOptions configuration
-		Class eventOptionsClass = NSClassFromString(@"TapTapEventOptions");
-		if (eventOptionsClass && [options respondsToSelector:@selector(setEventOptions:)]) {
-			id eventOptions = [[eventOptionsClass alloc] init];
-			if (eventOptions && [eventOptions respondsToSelector:@selector(setEnable:)]) {
-				[eventOptions setValue:@NO forKey:@"enable"];
-				[options setValue:eventOptions forKey:@"eventOptions"];
-				NSLog(@"[TapTap ObjC]   ✓ Disabled via TapTapEventOptions");
-			}
-		} else {
-			NSLog(@"[TapTap ObjC]   ✗ TapTapEventOptions not available");
-		}
-		
-		// Method 3: enableCrashReport property
-		if ([options respondsToSelector:@selector(setEnableCrashReport:)]) {
-			[options setValue:@NO forKey:@"enableCrashReport"];
-			NSLog(@"[TapTap ObjC]   ✓ Disabled via enableCrashReport");
-		}
-		
-	} @catch (NSException *e) {
-		NSLog(@"[TapTap ObjC]   ⚠️  Exception while configuring: %@", e);
-		NSLog(@"[TapTap ObjC]   Continuing with default configuration...");
-	}
-	
-	// === Initialize TapTap SDK ===
-	NSLog(@"[TapTap ObjC] ----------------------------------------");
-	NSLog(@"[TapTap ObjC] Calling [TapTapSDK initWithOptions]...");
-	NSLog(@"[TapTap ObjC] ----------------------------------------");
-	
-	@try {
-		// This is where the crash would occur if captureUncaughtException is missing
-		[TapTapSDK initWithOptions:options];
-		NSLog(@"[TapTap ObjC] ✅ [TapTapSDK initWithOptions] returned successfully");
-		
-	} @catch (NSException *exception) {
-		// If we get here, either:
-		// 1. Runtime injection failed
-		// 2. There's a different exception
-		NSLog(@"[TapTap ObjC] ❌❌❌ SDK initialization threw exception!");
-		NSLog(@"[TapTap ObjC] Exception: %@", exception);
-		NSLog(@"[TapTap ObjC] Reason: %@", exception.reason);
-		NSLog(@"[TapTap ObjC] User info: %@", exception.userInfo);
-		NSLog(@"[TapTap ObjC] Stack trace:");
-		for (NSString *frame in [exception callStackSymbols]) {
-			NSLog(@"[TapTap ObjC]   %@", frame);
-		}
-		
-		// Post error event to GDScript
-		Dictionary ret;
-		ret["type"] = "init";
-		ret["result"] = "error";
-		ret["message"] = String::utf8([[NSString stringWithFormat:@"SDK Exception: %@", exception.reason] UTF8String]);
-		Godot3TapTap::get_singleton()->_post_event(ret);
-		return;
-	}
-	
-	// === Initialization Success ===
-	_sdkInitialized = YES;
-	
-	NSLog(@"[TapTap ObjC] ========================================");
-	NSLog(@"[TapTap ObjC] ✅✅✅ SDK Initialization SUCCESS");
-	NSLog(@"[TapTap ObjC] ========================================");
-	
-	// Post success event to GDScript on main thread
-	// (Already on main thread, but dispatch_async ensures event queue is processed correctly)
+- (void)initSDKWithClientId:(NSString *)clientId clientToken:(NSString *)clientToken enableLog:(BOOL)enableLog {
 	dispatch_async(dispatch_get_main_queue(), ^{
-		Dictionary ret;
-		ret["type"] = "init";
-		ret["result"] = "ok";
-		Godot3TapTap::get_singleton()->_post_event(ret);
-		NSLog(@"[TapTap ObjC] Success event posted to GDScript");
+		self.clientId = clientId;
+		self.clientToken = clientToken;
+		
+		TapTapSdkOptions *options = [[TapTapSdkOptions alloc] init];
+		options.clientId = clientId;
+		options.clientToken = clientToken;
+		options.region = TapTapRegionTypeCN;
+		options.enableLog = enableLog;
+		
+		@try {
+			[TapTapSDK initWithOptions:options];
+			self.sdkInitialized = YES;
+			
+			Dictionary ret;
+			ret["type"] = "init";
+			ret["result"] = "ok";
+			Godot3TapTap::get_singleton()->_post_event(ret);
+		} @catch (NSException *exception) {
+			NSLog(@"[TapTap] SDK init failed: %@", exception.reason);
+			
+			Dictionary ret;
+			ret["type"] = "init";
+			ret["result"] = "error";
+			ret["message"] = String::utf8([exception.reason UTF8String]);
+			Godot3TapTap::get_singleton()->_post_event(ret);
+		}
 	});
 }
 
 - (void)loginWithProfile:(BOOL)useProfile friends:(BOOL)useFriends {
-	NSLog(@"[TapTap ObjC] loginWithProfile called");
-	NSLog(@"[TapTap ObjC] Thread: %@", [NSThread currentThread]);
-	NSLog(@"[TapTap ObjC] IsMainThread: %d", [NSThread isMainThread]);
-	NSLog(@"[TapTap ObjC] useProfile: %d, useFriends: %d", useProfile, useFriends);
-	
-	// Thread checking is done at C++ layer
-	if (![NSThread isMainThread]) {
-		NSLog(@"[TapTap ObjC] CRITICAL ERROR: Not on main thread! This should never happen!");
-		NSLog(@"[TapTap ObjC] Stack trace: %@", [NSThread callStackSymbols]);
-	}
-	
-	NSMutableArray *scopes = [NSMutableArray array];
-	if (useProfile) {
-		[scopes addObject:@"public_profile"];
-	} else {
-		[scopes addObject:@"basic_info"];
-	}
-	if (useFriends) {
-		[scopes addObject:@"user_friends"];
-	}
-	
-	NSLog(@"[TapTap] Calling TapTapLogin.LoginWithScopes");
-	
-	// Call TapTap Login SDK (using correct OC API)
-	[TapTapLogin LoginWithScopes:scopes viewController:nil handler:^(BOOL success, NSError *error, TapTapAccount *account) {
-		NSLog(@"[TapTap] Login handler callback on thread: %@", [NSThread currentThread]);
-		NSLog(@"[TapTap] Login result: success=%d, error=%@, account=%@", success, error, account);
+	dispatch_async(dispatch_get_main_queue(), ^{
+		NSMutableArray *scopes = [NSMutableArray array];
+		if (useProfile) {
+			[scopes addObject:@"public_profile"];
+		} else {
+			[scopes addObject:@"basic_info"];
+		}
+		if (useFriends) {
+			[scopes addObject:@"user_friends"];
+		}
 		
-		// Create Dictionary and post event - _post_event handles thread safety
-		if (error) {
-			if (error.code == 1) {
-				// User cancelled
-				NSLog(@"[TapTap] User cancelled login");
-				Dictionary ret;
-				ret["type"] = "login";
-				ret["result"] = "cancel";
-				Godot3TapTap::get_singleton()->_post_event(ret);
-			} else {
-				// Error occurred
-				NSLog(@"[TapTap] Login error: %@", error.localizedDescription);
-				Dictionary ret;
-				ret["type"] = "login";
-				ret["result"] = "error";
-				ret["message"] = String::utf8([error.localizedDescription UTF8String]);
-				Godot3TapTap::get_singleton()->_post_event(ret);
-			}
-		} else if (success && account && account.userInfo) {
-			// Login successful - extract profile from TapTapAccount.userInfo
-			NSLog(@"[TapTap] Login successful, preparing success event");
+		[TapTapLogin LoginWithScopes:scopes viewController:nil handler:^(BOOL success, NSError *error, TapTapAccount *account) {
 			Dictionary ret;
 			ret["type"] = "login";
-			ret["result"] = "success";
-			ret["openId"] = String::utf8([account.userInfo.openId UTF8String] ?: "");
-			ret["unionId"] = String::utf8([account.userInfo.unionId UTF8String] ?: "");
-			ret["name"] = String::utf8([account.userInfo.name UTF8String] ?: "");
-			ret["avatar"] = String::utf8([account.userInfo.avatar UTF8String] ?: "");
-			Godot3TapTap::get_singleton()->_post_event(ret);
-			NSLog(@"[TapTap] Login success event posted");
 			
-			// Store user ID for compliance
-			self.currentUserId = account.userInfo.openId;
-			NSLog(@"[TapTap] Stored currentUserId: %@", self.currentUserId);
-		}
-		NSLog(@"[TapTap] Login handler completed");
-	}];
-	
-	NSLog(@"[TapTap] TapTapLogin.LoginWithScopes call returned");
+			if (success && account) {
+				ret["result"] = "success";
+				Godot3TapTap::get_singleton()->_post_event(ret);
+				Godot3TapTap::get_singleton()->emit_signal("onLoginSuccess");
+			} else if (error) {
+				if (error.code == 1) {
+					ret["result"] = "cancel";
+					Godot3TapTap::get_singleton()->_post_event(ret);
+					Godot3TapTap::get_singleton()->emit_signal("onLoginCancel");
+				} else {
+					ret["result"] = "error";
+					ret["message"] = String::utf8([[error localizedDescription] UTF8String]);
+					Godot3TapTap::get_singleton()->_post_event(ret);
+					Godot3TapTap::get_singleton()->emit_signal("onLoginFail", ret["message"]);
+				}
+			}
+		}];
+	});
 }
 
 - (BOOL)isLoggedIn {
-	// Check TapTap SDK login status
 	return [TapTapLogin getCurrentTapAccount] != nil;
 }
 
-/**
- * @brief Get current user profile from TapTap SDK
- * 
- * CRITICAL: GDScript code checks for "error" field first!
- * - If error exists: returns early without accessing other fields
- * - If no error: accesses profile.name, profile.avatar etc.
- * 
- * Therefore, we MUST return ONLY error field when not logged in.
- * 
- * @return Dictionary:
- *   Success (logged in): {openId, unionId, name, avatar}
- *   Failure (not logged in): {error: "error message"}
- */
 - (NSDictionary *)getUserProfile {
-	NSLog(@"[TapTap ObjC] getUserProfile called");
-	
-	// Get current TapTap account
 	TapTapAccount *account = [TapTapLogin getCurrentTapAccount];
 	
 	if (account && account.userInfo) {
-		// User is logged in, return full profile WITHOUT error field
-		NSDictionary *profile = @{
-			@"openId": account.userInfo.openId ?: @"",
-			@"unionId": account.userInfo.unionId ?: @"",
+		return @{
+			@"openId": account.openId ?: @"",
+			@"unionId": account.unionId ?: @"",
 			@"name": account.userInfo.name ?: @"",
 			@"avatar": account.userInfo.avatar ?: @""
 		};
-		
-		NSLog(@"[TapTap ObjC] ✅ User profile found: openId=%@, name=%@", 
-			  account.userInfo.openId ?: @"(null)", 
-			  account.userInfo.name ?: @"(null)");
-		
-		return profile;
 	}
 	
-	// User is NOT logged in - return ONLY error field
-	// GDScript checks "if profile.has('error')" first, so this is correct
-	NSLog(@"[TapTap ObjC] ❌ User not logged in");
 	return @{@"error": @"User not logged in"};
 }
 
 - (void)logout {
-	NSLog(@"[TapTap] Logout called");
-	
-	// Call TapTap SDK logout
 	[TapTapLogin logout];
 	[TapTapCompliance exit];
-	
-	self.currentUserId = nil;
 	
 	Dictionary ret;
 	ret["type"] = "logout";
@@ -940,110 +179,27 @@ typedef PoolStringArray GodotStringArray;
 }
 
 - (void)startComplianceWithUserId:(NSString *)userId {
-	NSLog(@"[TapTap] Starting compliance with userId: %@", userId);
-	
-	if (!userId || userId.length == 0) {
-		NSLog(@"[TapTap] Cannot start compliance: invalid user ID");
-		Dictionary ret;
-		ret["type"] = "compliance";
-		ret["code"] = -1;
-		ret["info"] = "Invalid user ID";
-		Godot3TapTap::get_singleton()->_post_event(ret);
-		return;
-	}
-	
-	NSLog(@"[TapTap ObjC] Thread: %@", [NSThread currentThread]);
-	NSLog(@"[TapTap ObjC] IsMainThread: %d", [NSThread isMainThread]);
-	
-	// Thread checking is done at C++ layer
-	if (![NSThread isMainThread]) {
-		NSLog(@"[TapTap ObjC] CRITICAL ERROR: Not on main thread! This should never happen!");
-		NSLog(@"[TapTap ObjC] Stack trace: %@", [NSThread callStackSymbols]);
-	}
-	
-	NSLog(@"[TapTap ObjC] About to call [TapTapCompliance startup]");
-	
-	// Call TapTap Compliance SDK
-	[TapTapCompliance startup:userId];
-	
-	NSLog(@"[TapTap ObjC] [TapTapCompliance startup] returned");
-	
-	// Callback will be received via complianceCallbackWithCode:extra:
+	dispatch_async(dispatch_get_main_queue(), ^{
+		if (!userId || userId.length == 0) {
+			Dictionary ret;
+			ret["type"] = "compliance";
+			ret["code"] = -1;
+			ret["info"] = "Invalid user ID";
+			Godot3TapTap::get_singleton()->_post_event(ret);
+			return;
+		}
+		
+		[TapTapCompliance startup:userId];
+	});
 }
 
-// TapTapComplianceDelegate method
 - (void)complianceCallbackWithCode:(TapComplianceResultHandlerCode)code extra:(NSString * _Nullable)extra {
-	NSLog(@"[TapTap] complianceCallbackWithCode called on thread: %@", [NSThread currentThread]);
-	NSLog(@"[TapTap] Compliance callback: code=%ld, extra=%@", (long)code, extra);
-	
-	// Post event - _post_event handles thread safety
 	Dictionary ret;
 	ret["type"] = "compliance";
 	ret["code"] = (int)code;
 	ret["info"] = String::utf8([extra UTF8String] ?: "");
 	Godot3TapTap::get_singleton()->_post_event(ret);
-	NSLog(@"[TapTap] Compliance event posted");
-}
-
-- (void)checkLicenseWithForce:(BOOL)force {
-	NSLog(@"[TapTap] Checking license with force: %d", force);
-	
-	// Note: TapTap License SDK is not available for iOS
-	// License verification should be done on Android or server-side
-	NSLog(@"[TapTap] Warning: License check not supported on iOS");
-	
-	// Return success for compatibility (actual check should be on Android/server)
-	Dictionary ret;
-	ret["type"] = "license";
-	ret["result"] = "success";
-	ret["message"] = "iOS does not support license check";
-	Godot3TapTap::get_singleton()->_post_event(ret);
-}
-
-- (void)queryDLCWithSkuIds:(NSArray *)skuIds {
-	NSLog(@"[TapTap] Querying DLC with %lu SKUs", (unsigned long)[skuIds count]);
-	
-	// Note: TapTap DLC SDK is not available for iOS
-	// DLC operations should be done on Android or server-side
-	NSLog(@"[TapTap] Warning: DLC query not supported on iOS");
-	
-	// Return empty result for compatibility
-	Dictionary ret;
-	ret["type"] = "dlc_query";
-	ret["code"] = -1;
-	ret["codeName"] = "NOT_SUPPORTED_ON_IOS";
-	Dictionary query_list;
-	for (NSString *skuId in skuIds) {
-		query_list[String::utf8([skuId UTF8String])] = 0;
-	}
-	ret["queryList"] = query_list;
-	
-	NSError *error = nil;
-	NSData *jsonData = [NSJSONSerialization dataWithJSONObject:@{
-		@"code": @-1,
-		@"codeName": @"NOT_SUPPORTED_ON_IOS",
-		@"queryList": @{}
-	} options:0 error:&error];
-	NSString *jsonString = [[NSString alloc] initWithData:jsonData encoding:NSUTF8StringEncoding];
-	ret["jsonString"] = String::utf8([jsonString UTF8String]);
-	
-	Godot3TapTap::get_singleton()->_post_event(ret);
-}
-
-- (void)purchaseDLCWithSkuId:(NSString *)skuId {
-	NSLog(@"[TapTap] Purchasing DLC: %@", skuId);
-	
-	// Note: TapTap DLC SDK is not available for iOS
-	// DLC operations should be done on Android or server-side
-	NSLog(@"[TapTap] Warning: DLC purchase not supported on iOS");
-	
-	// Return error for compatibility
-	Dictionary ret;
-	ret["type"] = "dlc_purchase";
-	ret["skuId"] = String::utf8([skuId UTF8String]);
-	ret["status"] = -1;
-	ret["message"] = "Not supported on iOS";
-	Godot3TapTap::get_singleton()->_post_event(ret);
+	Godot3TapTap::get_singleton()->emit_signal("onComplianceResult", (int)code, ret["info"]);
 }
 
 @end
@@ -1056,42 +212,40 @@ static GodotTapTapDelegate *taptap_delegate = nil;
 Godot3TapTap *Godot3TapTap::instance = NULL;
 
 void Godot3TapTap::_bind_methods() {
-	// SDK Initialization
+	// SDK 初始化
 	ClassDB::bind_method(D_METHOD("initSdk"), &Godot3TapTap::initSdk);
 	ClassDB::bind_method(D_METHOD("initSdkWithEncryptedToken"), &Godot3TapTap::initSdkWithEncryptedToken);
 	
-	// Login
+	// 登录
 	ClassDB::bind_method(D_METHOD("login"), &Godot3TapTap::login);
 	ClassDB::bind_method(D_METHOD("isLogin"), &Godot3TapTap::isLogin);
 	ClassDB::bind_method(D_METHOD("getUserProfile"), &Godot3TapTap::getUserProfile);
 	ClassDB::bind_method(D_METHOD("logout"), &Godot3TapTap::logout);
 	ClassDB::bind_method(D_METHOD("logoutThenRestart"), &Godot3TapTap::logoutThenRestart);
 	
-	// Compliance
+	// 合规认证
 	ClassDB::bind_method(D_METHOD("compliance"), &Godot3TapTap::compliance);
 	
-	// License Verification
+	// License & DLC（iOS 不支持）
 	ClassDB::bind_method(D_METHOD("checkLicense"), &Godot3TapTap::checkLicense);
-	
-	// DLC
 	ClassDB::bind_method(D_METHOD("queryDLC"), &Godot3TapTap::queryDLC);
 	ClassDB::bind_method(D_METHOD("purchaseDLC"), &Godot3TapTap::purchaseDLC);
 	
-	// IAP
+	// IAP（iOS 不支持）
 	ClassDB::bind_method(D_METHOD("queryProductDetailsAsync"), &Godot3TapTap::queryProductDetailsAsync);
 	ClassDB::bind_method(D_METHOD("launchBillingFlow"), &Godot3TapTap::launchBillingFlow);
 	ClassDB::bind_method(D_METHOD("finishPurchaseAsync"), &Godot3TapTap::finishPurchaseAsync);
 	ClassDB::bind_method(D_METHOD("queryUnfinishedPurchaseAsync"), &Godot3TapTap::queryUnfinishedPurchaseAsync);
 	
-	// Utility
+	// 工具方法
 	ClassDB::bind_method(D_METHOD("showTip"), &Godot3TapTap::showTip);
 	ClassDB::bind_method(D_METHOD("restartApp"), &Godot3TapTap::restartApp);
-
-	// Event handling
+	
+	// 事件队列
 	ClassDB::bind_method(D_METHOD("get_pending_event_count"), &Godot3TapTap::get_pending_event_count);
 	ClassDB::bind_method(D_METHOD("pop_pending_event"), &Godot3TapTap::pop_pending_event);
 	
-	// Signals
+	// 信号（与 Android 版本完全一致）
 	ADD_SIGNAL(MethodInfo("onLoginSuccess"));
 	ADD_SIGNAL(MethodInfo("onLoginFail", PropertyInfo(Variant::STRING, "message")));
 	ADD_SIGNAL(MethodInfo("onLoginCancel"));
@@ -1107,152 +261,29 @@ void Godot3TapTap::_bind_methods() {
 	ADD_SIGNAL(MethodInfo("onLaunchBillingFlowResult", PropertyInfo(Variant::STRING, "jsonString")));
 }
 
-// Helper method to add events
-void Godot3TapTap::add_pending_event(const String &type, const String &result, const Dictionary &data) {
-	NSLog(@"[TapTap] add_pending_event called: type=%s, result=%s", type.utf8().get_data(), result.utf8().get_data());
-	Dictionary event;
-	event["type"] = type;
-	event["result"] = result;
-	if (!data.empty()) {
-		for (int i = 0; i < data.keys().size(); i++) {
-			Variant key = data.keys()[i];
-			event[key] = data[key];
-		}
-	}
-	pending_events.push_back(event);
-	NSLog(@"[TapTap] Event added, pending count: %d", pending_events.size());
-}
-
 void Godot3TapTap::_post_event(Variant p_event) {
-	NSLog(@"[TapTap] _post_event called from thread: %@", [NSThread currentThread]);
-	
-	// Ensure we're on the main thread for Godot operations
-	if (![NSThread isMainThread]) {
-		NSLog(@"[TapTap] WARNING: _post_event called from background thread, dispatching to main thread");
-		// Capture the event by value in the block
-		Variant event_copy = p_event;
-		dispatch_async(dispatch_get_main_queue(), ^{
-			NSLog(@"[TapTap] Now on main thread, adding event");
-			Godot3TapTap::get_singleton()->pending_events.push_back(event_copy);
-			NSLog(@"[TapTap] Event added on main thread, pending count: %d", Godot3TapTap::get_singleton()->pending_events.size());
-		});
-		return;
-	}
-	
-	NSLog(@"[TapTap] Adding event on main thread");
 	pending_events.push_back(p_event);
-	NSLog(@"[TapTap] Event added, pending count: %d", pending_events.size());
 }
 
-// SDK Initialization
+// SDK 初始化
 void Godot3TapTap::initSdk(const String &p_client_id, const String &p_client_token, bool p_enable_log, bool p_with_iap) {
-	NSLog(@"[TapTap C++] initSdk called");
-	NSLog(@"[TapTap C++] Thread: %@", [NSThread currentThread]);
-	NSLog(@"[TapTap C++] IsMainThread: %d", [NSThread isMainThread]);
-	NSLog(@"[TapTap C++] ClientId: %s, enableLog: %d, withIAP: %d", p_client_id.utf8().get_data(), p_enable_log, p_with_iap);
+	NSString *clientId = [[NSString alloc] initWithUTF8String:p_client_id.utf8().get_data()];
+	NSString *clientToken = [[NSString alloc] initWithUTF8String:p_client_token.utf8().get_data()];
 	
-	client_id = p_client_id;
-	client_token = p_client_token;
-	sdk_initialized = true;
-	
-	NSString *nsClientId = [NSString stringWithUTF8String:p_client_id.utf8().get_data()];
-	NSString *nsClientToken = [NSString stringWithUTF8String:p_client_token.utf8().get_data()];
-	
-	// CRITICAL: Force main thread execution for TapTap SDK init
-	if (![NSThread isMainThread]) {
-		NSLog(@"[TapTap C++] WARNING: Called from background thread, dispatching to main thread");
-		NSLog(@"[TapTap C++] Stack trace: %@", [NSThread callStackSymbols]);
-		dispatch_async(dispatch_get_main_queue(), ^{
-			NSLog(@"[TapTap C++] Now on main thread, calling ObjC delegate");
-			[taptap_delegate initSDKWithClientId:nsClientId clientToken:nsClientToken enableLog:p_enable_log withIAP:p_with_iap];
-		});
-		return;
-	}
-	
-	NSLog(@"[TapTap C++] Already on main thread, calling ObjC delegate directly");
-	[taptap_delegate initSDKWithClientId:nsClientId clientToken:nsClientToken enableLog:p_enable_log withIAP:p_with_iap];
-	NSLog(@"[TapTap C++] initSdk returned");
+	[taptap_delegate initSDKWithClientId:clientId clientToken:clientToken enableLog:p_enable_log];
 }
 
 void Godot3TapTap::initSdkWithEncryptedToken(const String &p_client_id, const String &p_encrypted_token, bool p_enable_log, bool p_with_iap) {
-	NSLog(@"[TapTap C++] initSdkWithEncryptedToken called");
-	NSLog(@"[TapTap C++] Thread: %@", [NSThread currentThread]);
-	NSLog(@"[TapTap C++] IsMainThread: %d", [NSThread isMainThread]);
+	NSString *clientId = [[NSString alloc] initWithUTF8String:p_client_id.utf8().get_data()];
+	NSString *encryptedToken = [[NSString alloc] initWithUTF8String:p_encrypted_token.utf8().get_data()];
 	
-	client_id = p_client_id;
-	sdk_initialized = true;
-	
-	// CRITICAL: Decrypt and init must happen on main thread
-	if (![NSThread isMainThread]) {
-		NSLog(@"[TapTap C++] WARNING: Called from background thread, dispatching entire flow to main thread");
-		NSLog(@"[TapTap C++] Stack trace: %@", [NSThread callStackSymbols]);
-		
-		// Capture all parameters for the block
-		String client_id_copy = p_client_id;
-		String encrypted_token_copy = p_encrypted_token;
-		
-		dispatch_async(dispatch_get_main_queue(), ^{
-			NSLog(@"[TapTap C++] Now on main thread, decrypting token");
-			NSString *nsEncryptedToken = [NSString stringWithUTF8String:encrypted_token_copy.utf8().get_data()];
-			NSString *nsDecryptedToken = [taptap_delegate decryptToken:nsEncryptedToken];
-			
-			if (!nsDecryptedToken || nsDecryptedToken.length == 0) {
-				NSLog(@"[TapTap C++] Failed to decrypt token");
-				Dictionary ret;
-				ret["type"] = "init";
-				ret["result"] = "error";
-				ret["message"] = "Failed to decrypt token";
-				Godot3TapTap::get_singleton()->_post_event(ret);
-				return;
-			}
-			
-			NSString *nsClientId = [NSString stringWithUTF8String:client_id_copy.utf8().get_data()];
-			NSLog(@"[TapTap C++] Token decrypted, calling ObjC delegate");
-			[taptap_delegate initSDKWithClientId:nsClientId clientToken:nsDecryptedToken enableLog:p_enable_log withIAP:p_with_iap];
-		});
-		return;
-	}
-	
-	NSLog(@"[TapTap C++] Already on main thread, decrypting token");
-	// Decrypt the token using the key from Info.plist
-	NSString *nsEncryptedToken = [NSString stringWithUTF8String:p_encrypted_token.utf8().get_data()];
-	NSString *nsDecryptedToken = [taptap_delegate decryptToken:nsEncryptedToken];
-	
-	if (!nsDecryptedToken || nsDecryptedToken.length == 0) {
-		NSLog(@"[TapTap C++] Failed to decrypt token, SDK initialization aborted");
-		Dictionary ret;
-		ret["type"] = "init";
-		ret["result"] = "error";
-		ret["message"] = "Failed to decrypt token";
-		_post_event(ret);
-		return;
-	}
-	
-	String decrypted_token = String::utf8([nsDecryptedToken UTF8String]);
-	NSLog(@"[TapTap C++] Token decrypted, calling initSdk");
-	initSdk(p_client_id, decrypted_token, p_enable_log, p_with_iap);
+	NSString *decryptedToken = [taptap_delegate decryptToken:encryptedToken];
+	[taptap_delegate initSDKWithClientId:clientId clientToken:decryptedToken enableLog:p_enable_log];
 }
 
-// Login
+// 登录
 void Godot3TapTap::login(bool p_use_profile, bool p_use_friends) {
-	NSLog(@"[TapTap C++] login called");
-	NSLog(@"[TapTap C++] Thread: %@", [NSThread currentThread]);
-	NSLog(@"[TapTap C++] IsMainThread: %d", [NSThread isMainThread]);
-	
-	// CRITICAL: Force main thread execution for UI operations
-	if (![NSThread isMainThread]) {
-		NSLog(@"[TapTap C++] WARNING: Called from background thread, dispatching to main thread");
-		NSLog(@"[TapTap C++] Stack trace: %@", [NSThread callStackSymbols]);
-		dispatch_async(dispatch_get_main_queue(), ^{
-			NSLog(@"[TapTap C++] Now on main thread, calling ObjC delegate");
-			[taptap_delegate loginWithProfile:p_use_profile friends:p_use_friends];
-		});
-		return;
-	}
-	
-	NSLog(@"[TapTap C++] Already on main thread, calling ObjC delegate directly");
 	[taptap_delegate loginWithProfile:p_use_profile friends:p_use_friends];
-	NSLog(@"[TapTap C++] login returned");
 }
 
 bool Godot3TapTap::isLogin() {
@@ -1262,13 +293,9 @@ bool Godot3TapTap::isLogin() {
 String Godot3TapTap::getUserProfile() {
 	NSDictionary *profile = [taptap_delegate getUserProfile];
 	
-	// Convert NSDictionary to JSON string
 	NSError *error = nil;
 	NSData *jsonData = [NSJSONSerialization dataWithJSONObject:profile options:0 error:&error];
-	if (error) {
-		NSLog(@"[TapTap] Error converting profile to JSON: %@", error);
-		return "{}";
-	}
+	if (!jsonData) return "{}";
 	
 	NSString *jsonString = [[NSString alloc] initWithData:jsonData encoding:NSUTF8StringEncoding];
 	return String::utf8([jsonString UTF8String]);
@@ -1283,112 +310,67 @@ void Godot3TapTap::logoutThenRestart() {
 	restartApp();
 }
 
-// Compliance (Anti-addiction)
+// 合规认证
 void Godot3TapTap::compliance() {
-	NSLog(@"[TapTap C++] compliance called");
-	NSLog(@"[TapTap C++] Thread: %@", [NSThread currentThread]);
-	NSLog(@"[TapTap C++] IsMainThread: %d", [NSThread isMainThread]);
-	
-	// CRITICAL: Force main thread execution for compliance
-	if (![NSThread isMainThread]) {
-		NSLog(@"[TapTap C++] WARNING: Called from background thread, dispatching to main thread");
-		NSLog(@"[TapTap C++] Stack trace: %@", [NSThread callStackSymbols]);
-		dispatch_async(dispatch_get_main_queue(), ^{
-			NSLog(@"[TapTap C++] Now on main thread, getting userId");
-			NSString *userId = [taptap_delegate currentUserId];
-			if (!userId || userId.length == 0) {
-				TapTapAccount *account = [TapTapLogin getCurrentTapAccount];
-				if (account && account.userInfo && account.userInfo.openId) {
-					userId = account.userInfo.openId;
-				}
-			}
-			NSLog(@"[TapTap C++] Calling ObjC delegate with userId: %@", userId);
-			[taptap_delegate startComplianceWithUserId:userId];
-		});
+	if (![taptap_delegate isLoggedIn]) {
+		Dictionary ret;
+		ret["type"] = "compliance";
+		ret["code"] = -1;
+		ret["info"] = "Not logged in";
+		_post_event(ret);
 		return;
 	}
 	
-	NSLog(@"[TapTap C++] Already on main thread, getting userId");
-	// Use stored user ID from login, or openId from current account
-	NSString *userId = [taptap_delegate currentUserId];
-	if (!userId || userId.length == 0) {
-		TapTapAccount *account = [TapTapLogin getCurrentTapAccount];
-		if (account && account.userInfo && account.userInfo.openId) {
-			userId = account.userInfo.openId;
-		}
+	TapTapAccount *account = [TapTapLogin getCurrentTapAccount];
+	if (account && account.unionId) {
+		[taptap_delegate startComplianceWithUserId:account.unionId];
 	}
-	
-	NSLog(@"[TapTap C++] Calling ObjC delegate with userId: %@", userId);
-	[taptap_delegate startComplianceWithUserId:userId];
-	NSLog(@"[TapTap C++] compliance returned");
 }
 
-// License Verification
+// License & DLC（iOS 不支持，返回占位）
 void Godot3TapTap::checkLicense(bool p_force_check) {
-	[taptap_delegate checkLicenseWithForce:p_force_check];
+	NSLog(@"[TapTap] License check not supported on iOS");
+	emit_signal("onLicenseSuccess");
 }
 
-// DLC
 void Godot3TapTap::queryDLC(const Array &p_sku_ids) {
-	NSMutableArray *skuIds = [NSMutableArray array];
-	for (int i = 0; i < p_sku_ids.size(); i++) {
-		String sku = p_sku_ids[i];
-		[skuIds addObject:[NSString stringWithUTF8String:sku.utf8().get_data()]];
-	}
-	
-	[taptap_delegate queryDLCWithSkuIds:skuIds];
+	NSLog(@"[TapTap] DLC query not supported on iOS");
+	emit_signal("onDLCQueryResult", "{}");
 }
 
 void Godot3TapTap::purchaseDLC(const String &p_sku_id) {
-	NSString *skuId = [NSString stringWithUTF8String:p_sku_id.utf8().get_data()];
-	[taptap_delegate purchaseDLCWithSkuId:skuId];
+	NSLog(@"[TapTap] DLC purchase not supported on iOS");
+	emit_signal("onDLCPurchaseResult", p_sku_id, -1);
 }
 
-// IAP (In-App Purchase) - Not supported on iOS
+// IAP（iOS 不支持，返回占位）
 void Godot3TapTap::queryProductDetailsAsync(const Array &p_products) {
-	NSLog(@"[TapTap] queryProductDetailsAsync called (not supported on iOS)");
-	
-	Dictionary result;
-	result["error"] = "IAP not supported on iOS";
-	add_pending_event("product_details", "error", result);
+	NSLog(@"[TapTap] IAP not supported on iOS");
+	emit_signal("onProductDetailsResponse", "{}");
 }
 
-void Godot3TapTap::launchBillingFlow(const String &p_product_id, const String &p_obfuscated_account_id) {
-	NSLog(@"[TapTap] launchBillingFlow called (not supported on iOS)");
-	
-	Dictionary result;
-	result["error"] = "IAP not supported on iOS";
-	add_pending_event("billing_flow", "error", result);
+void Godot3TapTap::launchBillingFlow(const String &p_product_id, const String &p_account_id) {
+	NSLog(@"[TapTap] IAP not supported on iOS");
+	emit_signal("onLaunchBillingFlowResult", "{}");
 }
 
-void Godot3TapTap::finishPurchaseAsync(const String &p_order_id, const String &p_purchase_token) {
-	NSLog(@"[TapTap] finishPurchaseAsync called (not supported on iOS)");
-	
-	Dictionary result;
-	result["error"] = "IAP not supported on iOS";
-	add_pending_event("finish_purchase", "error", result);
+void Godot3TapTap::finishPurchaseAsync(const String &p_order_id, const String &p_token) {
+	NSLog(@"[TapTap] IAP not supported on iOS");
+	emit_signal("onFinishPurchaseResponse", "{}");
 }
 
 void Godot3TapTap::queryUnfinishedPurchaseAsync() {
-	NSLog(@"[TapTap] queryUnfinishedPurchaseAsync called (not supported on iOS)");
-	
-	Dictionary result;
-	result["error"] = "IAP not supported on iOS";
-	add_pending_event("unfinished_purchase", "error", result);
+	NSLog(@"[TapTap] IAP not supported on iOS");
+	emit_signal("onQueryUnfinishedPurchaseResponse", "{}");
 }
 
-// Utility
+// 工具方法
 void Godot3TapTap::showTip(const String &p_text) {
-	NSLog(@"[TapTap] showTip: %@", [NSString stringWithUTF8String:p_text.utf8().get_data()]);
-	
-	// TODO: Show native iOS alert/toast
 	dispatch_async(dispatch_get_main_queue(), ^{
-		UIAlertController *alert = [UIAlertController alertControllerWithTitle:nil 
-			message:[NSString stringWithUTF8String:p_text.utf8().get_data()]
-			preferredStyle:UIAlertControllerStyleAlert];
-		
-		[alert addAction:[UIAlertAction actionWithTitle:@"OK" 
-			style:UIAlertActionStyleDefault handler:nil]];
+		UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"提示"
+																	   message:[[NSString alloc] initWithUTF8String:p_text.utf8().get_data()]
+																preferredStyle:UIAlertControllerStyleAlert];
+		[alert addAction:[UIAlertAction actionWithTitle:@"确定" style:UIAlertActionStyleDefault handler:nil]];
 		
 		UIViewController *rootVC = [UIApplication sharedApplication].keyWindow.rootViewController;
 		[rootVC presentViewController:alert animated:YES completion:nil];
@@ -1396,44 +378,20 @@ void Godot3TapTap::showTip(const String &p_text) {
 }
 
 void Godot3TapTap::restartApp() {
-	NSLog(@"[TapTap] restartApp called");
-	
-	// iOS doesn't support programmatic app restart
-	// Best practice: show alert and exit
-	dispatch_async(dispatch_get_main_queue(), ^{
-		UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Restart Required"
-			message:@"Please close and reopen the app."
-			preferredStyle:UIAlertControllerStyleAlert];
-		
-		[alert addAction:[UIAlertAction actionWithTitle:@"OK" 
-			style:UIAlertActionStyleDefault 
-			handler:^(UIAlertAction * _Nonnull action) {
-				exit(0);
-			}]];
-		
-		UIViewController *rootVC = [UIApplication sharedApplication].keyWindow.rootViewController;
-		[rootVC presentViewController:alert animated:YES completion:nil];
-	});
+	exit(0);
 }
 
 int Godot3TapTap::get_pending_event_count() {
-	int count = pending_events.size();
-	NSLog(@"[TapTap] get_pending_event_count: %d", count);
-	return count;
+	return pending_events.size();
 }
 
 Variant Godot3TapTap::pop_pending_event() {
-	NSLog(@"[TapTap] pop_pending_event called, pending count: %d", pending_events.size());
-	
 	if (pending_events.size() == 0) {
-		NSLog(@"[TapTap] WARNING: pop_pending_event called with empty queue");
 		return Variant();
 	}
 	
 	Variant front = pending_events.front()->get();
 	pending_events.pop_front();
-	
-	NSLog(@"[TapTap] Event popped, remaining count: %d", pending_events.size());
 	return front;
 }
 
@@ -1444,18 +402,11 @@ Godot3TapTap *Godot3TapTap::get_singleton() {
 Godot3TapTap::Godot3TapTap() {
 	ERR_FAIL_COND(instance != NULL);
 	instance = this;
-	sdk_initialized = false;
 	
-	// Initialize Objective-C delegate
 	taptap_delegate = [[GodotTapTapDelegate alloc] init];
-	
-	NSLog(@"[TapTap] Godot3TapTap singleton created");
 }
 
 Godot3TapTap::~Godot3TapTap() {
-	// Clean up Objective-C delegate
-	taptap_delegate = nil;
-	
 	instance = NULL;
-	NSLog(@"[TapTap] Godot3TapTap singleton destroyed");
+	taptap_delegate = nil;
 }
