@@ -42,6 +42,7 @@
 
 #import <Foundation/Foundation.h>
 #import <objc/runtime.h>  // Required for runtime method injection
+#import <CommonCrypto/CommonDigest.h>  // Required for SHA256 hashing
 
 // TapTap SDK Headers
 #import <TapTapLoginSDK/TapTapLoginSDK.h>
@@ -185,21 +186,91 @@ typedef PoolStringArray GodotStringArray;
 	NSLog(@"[TapTap Fix] -[NSMutableURLRequest generateSHA256SignatureWithSecret:] is MISSING");
 	NSLog(@"[TapTap Fix] Injecting stub implementation...");
 	
-	// Create stub implementation that returns empty string
+	// Create SHA256 signature implementation with full call stack logging
 	// Signature: id (return), id (self), SEL (_cmd), id (secret parameter)
 	IMP stubImplementation = imp_implementationWithBlock(^NSString*(NSMutableURLRequest *self, NSString *secret) {
-		NSLog(@"[TapTap Fix] Stub -[NSMutableURLRequest generateSHA256SignatureWithSecret:] called");
-		NSLog(@"[TapTap Fix] WARNING: Returning empty signature - this may affect SDK functionality");
+		NSLog(@"[TapTap Fix] ========================================");
+		NSLog(@"[TapTap Fix] generateSHA256SignatureWithSecret: CALLED");
+		NSLog(@"[TapTap Fix] ========================================");
 		
-		// In a real implementation, this would:
-		// 1. Get request body/URL/headers
-		// 2. Combine with secret
-		// 3. Generate SHA256 hash
-		// 4. Return hex string
-		// 
-		// For now, return empty string to prevent crash
-		// The SDK might still work if signature validation is optional
-		return @"";
+		// Print detailed call stack to identify which SDK module is calling this
+		NSArray<NSString *> *callStack = [NSThread callStackSymbols];
+		NSLog(@"[TapTap Fix] 📍 CALL STACK (Total: %lu frames):", (unsigned long)callStack.count);
+		for (NSUInteger i = 0; i < MIN(20, callStack.count); i++) {
+			NSString *frame = callStack[i];
+			// Highlight TapTap SDK frames
+			if ([frame containsString:@"TapTap"] || [frame containsString:@"TapSDK"]) {
+				NSLog(@"[TapTap Fix]   🔴 %2lu: %@", (unsigned long)i, frame);
+			} else {
+				NSLog(@"[TapTap Fix]   %2lu: %@", (unsigned long)i, frame);
+			}
+		}
+		
+		// Print request details
+		NSLog(@"[TapTap Fix] ========================================");
+		NSLog(@"[TapTap Fix] 📡 REQUEST DETAILS:");
+		NSLog(@"[TapTap Fix]   Method: %@", self.HTTPMethod ?: @"(null)");
+		NSLog(@"[TapTap Fix]   URL: %@", self.URL.absoluteString ?: @"(null)");
+		NSLog(@"[TapTap Fix]   Host: %@", self.URL.host ?: @"(null)");
+		NSLog(@"[TapTap Fix]   Path: %@", self.URL.path ?: @"(null)");
+		NSLog(@"[TapTap Fix]   Query: %@", self.URL.query ?: @"(null)");
+		NSLog(@"[TapTap Fix]   Body length: %lu bytes", (unsigned long)(self.HTTPBody.length));
+		NSLog(@"[TapTap Fix]   Secret provided: %@", secret ? @"YES" : @"NO");
+		if (secret) {
+			NSLog(@"[TapTap Fix]   Secret length: %lu", (unsigned long)secret.length);
+		}
+		NSLog(@"[TapTap Fix] ========================================");
+		
+		if (!secret || secret.length == 0) {
+			NSLog(@"[TapTap Fix] ⚠️  No secret provided, returning empty signature");
+			return @"";
+		}
+		
+		// Build signature input from request components
+		NSMutableString *signatureInput = [NSMutableString string];
+		
+		// 1. Add HTTP method
+		[signatureInput appendString:self.HTTPMethod ?: @"GET"];
+		[signatureInput appendString:@"\n"];
+		
+		// 2. Add URL path
+		NSString *path = self.URL.path ?: @"/";
+		[signatureInput appendString:path];
+		[signatureInput appendString:@"\n"];
+		
+		// 3. Add query string (sorted)
+		NSString *query = self.URL.query ?: @"";
+		[signatureInput appendString:query];
+		[signatureInput appendString:@"\n"];
+		
+		// 4. Add body if exists
+		if (self.HTTPBody && self.HTTPBody.length > 0) {
+			NSString *bodyString = [[NSString alloc] initWithData:self.HTTPBody encoding:NSUTF8StringEncoding];
+			if (bodyString) {
+				[signatureInput appendString:bodyString];
+			}
+		}
+		[signatureInput appendString:@"\n"];
+		
+		// 5. Add secret
+		[signatureInput appendString:secret];
+		
+		NSLog(@"[TapTap Fix] Signature input length: %lu", (unsigned long)signatureInput.length);
+		
+		// Generate SHA256 hash
+		NSData *data = [signatureInput dataUsingEncoding:NSUTF8StringEncoding];
+		unsigned char hash[CC_SHA256_DIGEST_LENGTH];
+		CC_SHA256(data.bytes, (CC_LONG)data.length, hash);
+		
+		// Convert to hex string
+		NSMutableString *hexString = [NSMutableString stringWithCapacity:CC_SHA256_DIGEST_LENGTH * 2];
+		for (int i = 0; i < CC_SHA256_DIGEST_LENGTH; i++) {
+			[hexString appendFormat:@"%02x", hash[i]];
+		}
+		
+		NSLog(@"[TapTap Fix] ✅ Generated SHA256 signature: %@", hexString);
+		NSLog(@"[TapTap Fix] ========================================");
+		return hexString;
 	});
 	
 	// Inject into class (for instance methods, not metaclass)
@@ -634,6 +705,20 @@ typedef PoolStringArray GodotStringArray;
 	options.clientToken = clientToken;
 	options.region = TapTapRegionTypeCN;  // China region
 	options.enableLog = enableLog;
+	
+	// === CRITICAL: Print final token being passed to SDK ===
+	NSLog(@"[TapTap ObjC] ========================================");
+	NSLog(@"[TapTap ObjC] *** FINAL TOKEN VERIFICATION ***");
+	NSLog(@"[TapTap ObjC] ⚠️  WARNING: Full token logged for debugging");
+	NSLog(@"[TapTap ObjC] ⚠️  REMOVE THIS LOG IN PRODUCTION BUILD");
+	NSLog(@"[TapTap ObjC] Client ID: %@", clientId);
+	NSLog(@"[TapTap ObjC] Client ID length: %lu", (unsigned long)clientId.length);
+	NSLog(@"[TapTap ObjC] Client Token: %@", clientToken);
+	NSLog(@"[TapTap ObjC] Client Token length: %lu", (unsigned long)clientToken.length);
+	NSLog(@"[TapTap ObjC] Token first 10 chars: %@", [clientToken substringToIndex:MIN(10, clientToken.length)]);
+	NSLog(@"[TapTap ObjC] Token last 10 chars: %@", [clientToken substringFromIndex:MAX(0, (NSInteger)clientToken.length - 10)]);
+	NSLog(@"[TapTap ObjC] ========================================");
+	
 	NSLog(@"[TapTap ObjC] Basic options configured");
 	
 	// === Attempt to Disable Crash Reporting (Defense in Depth) ===
@@ -801,15 +886,15 @@ typedef PoolStringArray GodotStringArray;
 /**
  * @brief Get current user profile from TapTap SDK
  * 
- * Returns a consistent Dictionary structure regardless of login state.
- * This ensures GDScript code can safely access fields without checking.
+ * CRITICAL: GDScript code checks for "error" field first!
+ * - If error exists: returns early without accessing other fields
+ * - If no error: accesses profile.name, profile.avatar etc.
  * 
- * @return Dictionary with user profile fields:
- *   - openId: User's unique identifier (empty if not logged in)
- *   - unionId: User's union identifier (empty if not logged in)
- *   - name: User's display name (empty if not logged in)
- *   - avatar: User's avatar URL (empty if not logged in)
- *   - error: Error message if user is not logged in
+ * Therefore, we MUST return ONLY error field when not logged in.
+ * 
+ * @return Dictionary:
+ *   Success (logged in): {openId, unionId, name, avatar}
+ *   Failure (not logged in): {error: "error message"}
  */
 - (NSDictionary *)getUserProfile {
 	NSLog(@"[TapTap ObjC] getUserProfile called");
@@ -818,7 +903,7 @@ typedef PoolStringArray GodotStringArray;
 	TapTapAccount *account = [TapTapLogin getCurrentTapAccount];
 	
 	if (account && account.userInfo) {
-		// User is logged in, return full profile
+		// User is logged in, return full profile WITHOUT error field
 		NSDictionary *profile = @{
 			@"openId": account.userInfo.openId ?: @"",
 			@"unionId": account.userInfo.unionId ?: @"",
@@ -826,23 +911,17 @@ typedef PoolStringArray GodotStringArray;
 			@"avatar": account.userInfo.avatar ?: @""
 		};
 		
-		NSLog(@"[TapTap ObjC] User profile found: openId=%@, name=%@", 
+		NSLog(@"[TapTap ObjC] ✅ User profile found: openId=%@, name=%@", 
 			  account.userInfo.openId ?: @"(null)", 
 			  account.userInfo.name ?: @"(null)");
 		
 		return profile;
 	}
 	
-	// User is NOT logged in - return consistent structure with empty values
-	// This prevents GDScript errors when trying to access profile.name
-	NSLog(@"[TapTap ObjC] User not logged in, returning empty profile with error");
-	return @{
-		@"openId": @"",
-		@"unionId": @"",
-		@"name": @"",
-		@"avatar": @"",
-		@"error": @"User not logged in"
-	};
+	// User is NOT logged in - return ONLY error field
+	// GDScript checks "if profile.has('error')" first, so this is correct
+	NSLog(@"[TapTap ObjC] ❌ User not logged in");
+	return @{@"error": @"User not logged in"};
 }
 
 - (void)logout {

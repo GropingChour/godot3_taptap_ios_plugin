@@ -30,6 +30,7 @@ files=[]
 
 [plist]
 TapTapDecryptKey:string_input="TapTap73sev5b6P5eZxAy2"
+
 CFBundleURLTypes:raw="
 <array>
 	<dict>
@@ -39,8 +40,16 @@ CFBundleURLTypes:raw="
 		<string>taptap</string>
 		<key>CFBundleURLSchemes</key>
 		<array>
-			<string>ttwpyjvbc5f2jnqqlgfr</string>
+			<string>open-taptap-wpyjvbc5f2jnqqlgfr</string>
 		</array>
 	</dict>
+</array>
+"
+
+LSApplicationQueriesSchemes:raw="
+<array>
+	<string>tapiosdk</string>
+	<string>tapsdk</string>
+	<string>taptap</string>
 </array>
 "
