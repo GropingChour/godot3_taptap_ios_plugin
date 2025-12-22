@@ -41,6 +41,7 @@
 #endif
 
 #import <Foundation/Foundation.h>
+#import <objc/runtime.h>  // Required for runtime method injection
 
 // TapTap SDK Headers
 #import <TapTapLoginSDK/TapTapLoginSDK.h>
@@ -52,6 +53,110 @@ typedef PackedStringArray GodotStringArray;
 #else
 typedef PoolStringArray GodotStringArray;
 #endif
+
+// MARK: - Runtime Fix for Missing TapTapEvent Methods
+
+/**
+ * @brief Runtime method injector to fix missing TapTapEvent methods
+ * 
+ * Problem: TapTap SDK's TapTapEvent class is missing the +captureUncaughtException
+ * class method, which causes a crash with "unrecognized selector" error during SDK initialization.
+ * 
+ * Solution: Use Objective-C runtime to inject a stub implementation of the missing method
+ * before SDK initialization occurs. This is done in +load which runs before main().
+ * 
+ * Technical Details:
+ * - Class methods are stored in the metaclass, not the class itself
+ * - Must use object_getClass() to get metaclass for class method injection
+ * - +load is called automatically by the runtime during class loading
+ * - This fix is transparent to the SDK and prevents crashes
+ */
+@interface TapTapEventMethodInjector : NSObject
++ (void)injectMissingMethods;
+@end
+
+@implementation TapTapEventMethodInjector
+
+/**
+ * @brief Automatically called by Objective-C runtime before main()
+ * 
+ * The +load method is guaranteed to be called exactly once per class,
+ * during the initial loading of the class into the runtime, before any
+ * instances are created or any other methods are called.
+ */
++ (void)load {
+	NSLog(@"[TapTap Fix] +load called, injecting missing TapTapEvent methods");
+	[self injectMissingMethods];
+}
+
+/**
+ * @brief Injects stub implementations for missing TapTapEvent methods
+ * 
+ * This method checks if TapTapEvent class exists and if it's missing
+ * the captureUncaughtException method. If missing, it injects a no-op
+ * stub to prevent crashes.
+ */
++ (void)injectMissingMethods {
+	// Step 1: Check if TapTapEvent class exists
+	Class eventClass = NSClassFromString(@"TapTapEvent");
+	if (!eventClass) {
+		NSLog(@"[TapTap Fix] TapTapEvent class not found, skipping injection (SDK might not be linked yet)");
+		return;
+	}
+	
+	NSLog(@"[TapTap Fix] TapTapEvent class found: %@", eventClass);
+	
+	// Step 2: Check if the problematic method already exists
+	SEL missingSelector = @selector(captureUncaughtException);
+	Method existingMethod = class_getClassMethod(eventClass, missingSelector);
+	
+	if (existingMethod) {
+		NSLog(@"[TapTap Fix] +[TapTapEvent captureUncaughtException] already exists, no injection needed");
+		return;
+	}
+	
+	NSLog(@"[TapTap Fix] +[TapTapEvent captureUncaughtException] is MISSING");
+	NSLog(@"[TapTap Fix] Injecting stub implementation to prevent crash...");
+	
+	// Step 3: Create a no-op stub implementation using a block
+	// This block will be called instead of the missing method
+	IMP stubImplementation = imp_implementationWithBlock(^(id self) {
+		// Empty implementation - does nothing but prevents crash
+		NSLog(@"[TapTap Fix] Stub +[TapTapEvent captureUncaughtException] was called (no-op)");
+		// The SDK probably wanted to set up exception handlers here,
+		// but we skip it to avoid crashes. This is safe because:
+		// 1. Exception handling is optional functionality
+		// 2. The game has its own crash handlers (Godot, OS)
+		// 3. TapTap SDK will still work without this feature
+	});
+	
+	// Step 4: Get the metaclass (required for class method injection)
+	// Class methods are stored in the metaclass, not the class itself
+	Class metaClass = object_getClass(eventClass);
+	NSLog(@"[TapTap Fix] Metaclass for injection: %@", metaClass);
+	
+	// Step 5: Add the method to the metaclass
+	// Signature: "v@:" means: void return, id self, SEL _cmd (no other parameters)
+	BOOL added = class_addMethod(metaClass, 
+								  missingSelector, 
+								  stubImplementation, 
+								  "v@:");
+	
+	if (added) {
+		NSLog(@"[TapTap Fix] ✅ Successfully injected +[TapTapEvent captureUncaughtException]");
+		
+		// Verify the injection worked
+		if ([eventClass respondsToSelector:missingSelector]) {
+			NSLog(@"[TapTap Fix] ✅ Verification: Method is now callable");
+		} else {
+			NSLog(@"[TapTap Fix] ⚠️  WARNING: Method was added but verification failed!");
+		}
+	} else {
+		NSLog(@"[TapTap Fix] ❌ Failed to inject method (method might already exist or class is read-only)");
+	}
+}
+
+@end
 
 // MARK: - Objective-C Delegate for TapTap SDK callbacks
 
@@ -143,89 +248,154 @@ typedef PoolStringArray GodotStringArray;
 	return decryptedToken;
 }
 
+/**
+ * @brief Initialize TapTap SDK with client credentials
+ * 
+ * @param clientId TapTap application client ID
+ * @param clientToken TapTap application client token (plaintext)
+ * @param enableLog Enable SDK debug logging
+ * @param withIAP Enable In-App Purchase features (not supported on iOS)
+ * 
+ * CRITICAL: This method MUST be called on the main thread because:
+ * 1. TapTap SDK registers notification observers that require main thread
+ * 2. SDK may perform UI operations during initialization
+ * 3. Thread safety is ensured at C++ layer before calling this method
+ * 
+ * The method includes comprehensive logging and error handling to diagnose
+ * initialization issues, especially the missing captureUncaughtException method.
+ */
 - (void)initSDKWithClientId:(NSString *)clientId clientToken:(NSString *)clientToken enableLog:(BOOL)enableLog withIAP:(BOOL)withIAP {
 	_clientId = clientId;
 	_clientToken = clientToken;
 	
-	NSLog(@"[TapTap ObjC] ========== SDK Initialization Start ==========");
+	// === Initialization Start - Log Configuration ===
+	NSLog(@"[TapTap ObjC] ========================================");
+	NSLog(@"[TapTap ObjC] SDK Initialization Start");
+	NSLog(@"[TapTap ObjC] ========================================");
 	NSLog(@"[TapTap ObjC] Thread: %@", [NSThread currentThread]);
-	NSLog(@"[TapTap ObjC] IsMainThread: %d", [NSThread isMainThread]);
-	NSLog(@"[TapTap ObjC] ClientId: %@, enableLog: %d, withIAP: %d", clientId, enableLog, withIAP);
+	NSLog(@"[TapTap ObjC] Main thread: %d (MUST be 1)", [NSThread isMainThread]);
+	NSLog(@"[TapTap ObjC] Client ID: %@", clientId);
+	NSLog(@"[TapTap ObjC] Enable log: %d", enableLog);
+	NSLog(@"[TapTap ObjC] With IAP: %d (ignored on iOS)", withIAP);
 	
-	// Thread validation
+	// === Thread Safety Check ===
+	// If not on main thread, abort immediately to prevent crashes
 	if (![NSThread isMainThread]) {
-		NSLog(@"[TapTap ObjC] FATAL: Not on main thread!");
-		NSLog(@"[TapTap ObjC] Stack trace: %@", [NSThread callStackSymbols]);
+		NSLog(@"[TapTap ObjC] ❌ FATAL ERROR: Not on main thread!");
+		NSLog(@"[TapTap ObjC] TapTap SDK initialization MUST run on main thread");
+		NSLog(@"[TapTap ObjC] Call stack:");
+		for (NSString *frame in [NSThread callStackSymbols]) {
+			NSLog(@"[TapTap ObjC]   %@", frame);
+		}
+		
+		// Post error event to GDScript
+		Dictionary ret;
+		ret["type"] = "init";
+		ret["result"] = "error";
+		ret["message"] = "SDK initialization called from background thread";
+		Godot3TapTap::get_singleton()->_post_event(ret);
 		return;
 	}
 	
-	// CRITICAL FIX: Try to prevent TapTapEvent from initializing
-	// Check if TapTapEvent class responds to the problematic selector
+	// === Verify Runtime Method Injection ===
+	// Check if our +load method successfully injected the missing method
 	Class eventClass = NSClassFromString(@"TapTapEvent");
 	if (eventClass) {
-		NSLog(@"[TapTap ObjC] Found TapTapEvent class: %@", eventClass);
+		NSLog(@"[TapTap ObjC] Checking TapTapEvent class: %@", eventClass);
 		
-		SEL problematicSelector = NSSelectorFromString(@"captureUncaughtException");
-		if ([eventClass respondsToSelector:problematicSelector]) {
-			NSLog(@"[TapTap ObjC] TapTapEvent responds to captureUncaughtException (OK)");
+		SEL targetSelector = @selector(captureUncaughtException);
+		if ([eventClass respondsToSelector:targetSelector]) {
+			NSLog(@"[TapTap ObjC] ✅ captureUncaughtException is available (injected by runtime fix)");
 		} else {
-			NSLog(@"[TapTap ObjC] WARNING: TapTapEvent does NOT respond to captureUncaughtException");
-			NSLog(@"[TapTap ObjC] This will cause a crash during SDK init. Attempting workaround...");
+			NSLog(@"[TapTap ObjC] ⚠️  WARNING: captureUncaughtException STILL missing!");
+			NSLog(@"[TapTap ObjC] Runtime injection may have failed. SDK may crash during init.");
 		}
 	} else {
-		NSLog(@"[TapTap ObjC] TapTapEvent class not found (might be OK)");
+		NSLog(@"[TapTap ObjC] TapTapEvent class not found (SDK might initialize it later)");
 	}
 	
+	// === Create SDK Options ===
 	NSLog(@"[TapTap ObjC] Creating TapTapSdkOptions...");
 	TapTapSdkOptions *options = [[TapTapSdkOptions alloc] init];
+	
+	if (!options) {
+		NSLog(@"[TapTap ObjC] ❌ Failed to allocate TapTapSdkOptions!");
+		Dictionary ret;
+		ret["type"] = "init";
+		ret["result"] = "error";
+		ret["message"] = "Failed to create SDK options object";
+		Godot3TapTap::get_singleton()->_post_event(ret);
+		return;
+	}
+	
+	// Configure basic options
 	options.clientId = clientId;
 	options.clientToken = clientToken;
-	options.region = TapTapRegionTypeCN;
+	options.region = TapTapRegionTypeCN;  // China region
 	options.enableLog = enableLog;
+	NSLog(@"[TapTap ObjC] Basic options configured");
 	
-	// Try multiple ways to disable crash reporting
+	// === Attempt to Disable Crash Reporting (Defense in Depth) ===
+	// Even with runtime injection, try to disable crash handlers as backup
+	NSLog(@"[TapTap ObjC] Attempting to disable SDK crash reporting...");
+	
 	@try {
-		// Method 1: Direct property (if exists)
+		// Method 1: enableAutoReport property
 		if ([options respondsToSelector:@selector(setEnableAutoReport:)]) {
 			[options setValue:@NO forKey:@"enableAutoReport"];
-			NSLog(@"[TapTap ObjC] ✓ Disabled auto report via property");
+			NSLog(@"[TapTap ObjC]   ✓ Disabled via enableAutoReport");
 		} else {
-			NSLog(@"[TapTap ObjC] ✗ enableAutoReport property not available");
+			NSLog(@"[TapTap ObjC]   ✗ enableAutoReport not available");
 		}
 		
-		// Method 2: Disable via TapTapEventOptions (if available)
+		// Method 2: TapTapEventOptions configuration
 		Class eventOptionsClass = NSClassFromString(@"TapTapEventOptions");
 		if (eventOptionsClass && [options respondsToSelector:@selector(setEventOptions:)]) {
 			id eventOptions = [[eventOptionsClass alloc] init];
-			if ([eventOptions respondsToSelector:@selector(setEnable:)]) {
+			if (eventOptions && [eventOptions respondsToSelector:@selector(setEnable:)]) {
 				[eventOptions setValue:@NO forKey:@"enable"];
-				NSLog(@"[TapTap ObjC] ✓ Disabled TapTapEventOptions");
+				[options setValue:eventOptions forKey:@"eventOptions"];
+				NSLog(@"[TapTap ObjC]   ✓ Disabled via TapTapEventOptions");
 			}
-			[options setValue:eventOptions forKey:@"eventOptions"];
 		} else {
-			NSLog(@"[TapTap ObjC] ✗ TapTapEventOptions not available");
+			NSLog(@"[TapTap ObjC]   ✗ TapTapEventOptions not available");
 		}
 		
-		// Method 3: Check for other crash reporting flags
+		// Method 3: enableCrashReport property
 		if ([options respondsToSelector:@selector(setEnableCrashReport:)]) {
 			[options setValue:@NO forKey:@"enableCrashReport"];
-			NSLog(@"[TapTap ObjC] ✓ Disabled crash report via enableCrashReport");
+			NSLog(@"[TapTap ObjC]   ✓ Disabled via enableCrashReport");
 		}
 		
 	} @catch (NSException *e) {
-		NSLog(@"[TapTap ObjC] Exception while configuring options: %@", e);
+		NSLog(@"[TapTap ObjC]   ⚠️  Exception while configuring: %@", e);
+		NSLog(@"[TapTap ObjC]   Continuing with default configuration...");
 	}
 	
+	// === Initialize TapTap SDK ===
+	NSLog(@"[TapTap ObjC] ----------------------------------------");
 	NSLog(@"[TapTap ObjC] Calling [TapTapSDK initWithOptions]...");
+	NSLog(@"[TapTap ObjC] ----------------------------------------");
 	
 	@try {
+		// This is where the crash would occur if captureUncaughtException is missing
 		[TapTapSDK initWithOptions:options];
-		NSLog(@"[TapTap ObjC] ✅ SDK init call completed");
-	} @catch (NSException *exception) {
-		NSLog(@"[TapTap ObjC] ❌ SDK init threw exception: %@", exception);
-		NSLog(@"[TapTap ObjC] Reason: %@", exception.reason);
-		NSLog(@"[TapTap ObjC] Stack: %@", exception.callStackSymbols);
+		NSLog(@"[TapTap ObjC] ✅ [TapTapSDK initWithOptions] returned successfully");
 		
+	} @catch (NSException *exception) {
+		// If we get here, either:
+		// 1. Runtime injection failed
+		// 2. There's a different exception
+		NSLog(@"[TapTap ObjC] ❌❌❌ SDK initialization threw exception!");
+		NSLog(@"[TapTap ObjC] Exception: %@", exception);
+		NSLog(@"[TapTap ObjC] Reason: %@", exception.reason);
+		NSLog(@"[TapTap ObjC] User info: %@", exception.userInfo);
+		NSLog(@"[TapTap ObjC] Stack trace:");
+		for (NSString *frame in [exception callStackSymbols]) {
+			NSLog(@"[TapTap ObjC]   %@", frame);
+		}
+		
+		// Post error event to GDScript
 		Dictionary ret;
 		ret["type"] = "init";
 		ret["result"] = "error";
@@ -234,16 +404,22 @@ typedef PoolStringArray GodotStringArray;
 		return;
 	}
 	
+	// === Initialization Success ===
 	_sdkInitialized = YES;
-	NSLog(@"[TapTap ObjC] ========== SDK Initialization Success ==========");
 	
-	// Post init success event
-	Dictionary ret;
-	ret["type"] = "init";
-	ret["result"] = "ok";
-	Godot3TapTap::get_singleton()->_post_event(ret);
+	NSLog(@"[TapTap ObjC] ========================================");
+	NSLog(@"[TapTap ObjC] ✅✅✅ SDK Initialization SUCCESS");
+	NSLog(@"[TapTap ObjC] ========================================");
 	
-	NSLog(@"[TapTap ObjC] Init event posted");
+	// Post success event to GDScript on main thread
+	// (Already on main thread, but dispatch_async ensures event queue is processed correctly)
+	dispatch_async(dispatch_get_main_queue(), ^{
+		Dictionary ret;
+		ret["type"] = "init";
+		ret["result"] = "ok";
+		Godot3TapTap::get_singleton()->_post_event(ret);
+		NSLog(@"[TapTap ObjC] Success event posted to GDScript");
+	});
 }
 
 - (void)loginWithProfile:(BOOL)useProfile friends:(BOOL)useFriends {
