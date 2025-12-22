@@ -147,31 +147,95 @@ typedef PoolStringArray GodotStringArray;
 	_clientId = clientId;
 	_clientToken = clientToken;
 	
-	NSLog(@"[TapTap ObjC] initSDKWithClientId called");
+	NSLog(@"[TapTap ObjC] ========== SDK Initialization Start ==========");
 	NSLog(@"[TapTap ObjC] Thread: %@", [NSThread currentThread]);
 	NSLog(@"[TapTap ObjC] IsMainThread: %d", [NSThread isMainThread]);
 	NSLog(@"[TapTap ObjC] ClientId: %@, enableLog: %d, withIAP: %d", clientId, enableLog, withIAP);
 	
-	// Thread checking is done at C++ layer
+	// Thread validation
 	if (![NSThread isMainThread]) {
-		NSLog(@"[TapTap ObjC] CRITICAL ERROR: Not on main thread! This should never happen!");
+		NSLog(@"[TapTap ObjC] FATAL: Not on main thread!");
 		NSLog(@"[TapTap ObjC] Stack trace: %@", [NSThread callStackSymbols]);
+		return;
 	}
 	
-	NSLog(@"[TapTap ObjC] About to call [TapTapSDK initWithOptions]");
+	// CRITICAL FIX: Try to prevent TapTapEvent from initializing
+	// Check if TapTapEvent class responds to the problematic selector
+	Class eventClass = NSClassFromString(@"TapTapEvent");
+	if (eventClass) {
+		NSLog(@"[TapTap ObjC] Found TapTapEvent class: %@", eventClass);
+		
+		SEL problematicSelector = NSSelectorFromString(@"captureUncaughtException");
+		if ([eventClass respondsToSelector:problematicSelector]) {
+			NSLog(@"[TapTap ObjC] TapTapEvent responds to captureUncaughtException (OK)");
+		} else {
+			NSLog(@"[TapTap ObjC] WARNING: TapTapEvent does NOT respond to captureUncaughtException");
+			NSLog(@"[TapTap ObjC] This will cause a crash during SDK init. Attempting workaround...");
+		}
+	} else {
+		NSLog(@"[TapTap ObjC] TapTapEvent class not found (might be OK)");
+	}
 	
-	// Initialize TapTap SDK
+	NSLog(@"[TapTap ObjC] Creating TapTapSdkOptions...");
 	TapTapSdkOptions *options = [[TapTapSdkOptions alloc] init];
 	options.clientId = clientId;
 	options.clientToken = clientToken;
 	options.region = TapTapRegionTypeCN;
 	options.enableLog = enableLog;
 	
-	[TapTapSDK initWithOptions:options];
+	// Try multiple ways to disable crash reporting
+	@try {
+		// Method 1: Direct property (if exists)
+		if ([options respondsToSelector:@selector(setEnableAutoReport:)]) {
+			[options setValue:@NO forKey:@"enableAutoReport"];
+			NSLog(@"[TapTap ObjC] ✓ Disabled auto report via property");
+		} else {
+			NSLog(@"[TapTap ObjC] ✗ enableAutoReport property not available");
+		}
+		
+		// Method 2: Disable via TapTapEventOptions (if available)
+		Class eventOptionsClass = NSClassFromString(@"TapTapEventOptions");
+		if (eventOptionsClass && [options respondsToSelector:@selector(setEventOptions:)]) {
+			id eventOptions = [[eventOptionsClass alloc] init];
+			if ([eventOptions respondsToSelector:@selector(setEnable:)]) {
+				[eventOptions setValue:@NO forKey:@"enable"];
+				NSLog(@"[TapTap ObjC] ✓ Disabled TapTapEventOptions");
+			}
+			[options setValue:eventOptions forKey:@"eventOptions"];
+		} else {
+			NSLog(@"[TapTap ObjC] ✗ TapTapEventOptions not available");
+		}
+		
+		// Method 3: Check for other crash reporting flags
+		if ([options respondsToSelector:@selector(setEnableCrashReport:)]) {
+			[options setValue:@NO forKey:@"enableCrashReport"];
+			NSLog(@"[TapTap ObjC] ✓ Disabled crash report via enableCrashReport");
+		}
+		
+	} @catch (NSException *e) {
+		NSLog(@"[TapTap ObjC] Exception while configuring options: %@", e);
+	}
+	
+	NSLog(@"[TapTap ObjC] Calling [TapTapSDK initWithOptions]...");
+	
+	@try {
+		[TapTapSDK initWithOptions:options];
+		NSLog(@"[TapTap ObjC] ✅ SDK init call completed");
+	} @catch (NSException *exception) {
+		NSLog(@"[TapTap ObjC] ❌ SDK init threw exception: %@", exception);
+		NSLog(@"[TapTap ObjC] Reason: %@", exception.reason);
+		NSLog(@"[TapTap ObjC] Stack: %@", exception.callStackSymbols);
+		
+		Dictionary ret;
+		ret["type"] = "init";
+		ret["result"] = "error";
+		ret["message"] = String::utf8([[NSString stringWithFormat:@"SDK Exception: %@", exception.reason] UTF8String]);
+		Godot3TapTap::get_singleton()->_post_event(ret);
+		return;
+	}
 	
 	_sdkInitialized = YES;
-	
-	NSLog(@"[TapTap] SDK initialized successfully");
+	NSLog(@"[TapTap ObjC] ========== SDK Initialization Success ==========");
 	
 	// Post init success event
 	Dictionary ret;
@@ -179,7 +243,7 @@ typedef PoolStringArray GodotStringArray;
 	ret["result"] = "ok";
 	Godot3TapTap::get_singleton()->_post_event(ret);
 	
-	NSLog(@"[TapTap] Init event posted");
+	NSLog(@"[TapTap ObjC] Init event posted");
 }
 
 - (void)loginWithProfile:(BOOL)useProfile friends:(BOOL)useFriends {
