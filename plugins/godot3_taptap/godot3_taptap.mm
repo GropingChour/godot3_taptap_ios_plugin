@@ -147,20 +147,18 @@ typedef PoolStringArray GodotStringArray;
 	_clientId = clientId;
 	_clientToken = clientToken;
 	
-	NSLog(@"[TapTap] initSDKWithClientId called on thread: %@", [NSThread currentThread]);
-	NSLog(@"[TapTap] Initializing SDK with clientId: %@, enableLog: %d, withIAP: %d", clientId, enableLog, withIAP);
+	NSLog(@"[TapTap ObjC] initSDKWithClientId called");
+	NSLog(@"[TapTap ObjC] Thread: %@", [NSThread currentThread]);
+	NSLog(@"[TapTap ObjC] IsMainThread: %d", [NSThread isMainThread]);
+	NSLog(@"[TapTap ObjC] ClientId: %@, enableLog: %d, withIAP: %d", clientId, enableLog, withIAP);
 	
-	// CRITICAL: TapTap SDK initialization MUST be called on main thread
-	// because it registers notification observers which causes EXC_BAD_ACCESS on background threads
+	// Thread checking is done at C++ layer
 	if (![NSThread isMainThread]) {
-		NSLog(@"[TapTap] WARNING: Not on main thread, dispatching SDK init to main thread");
-		dispatch_async(dispatch_get_main_queue(), ^{
-			[self initSDKWithClientId:clientId clientToken:clientToken enableLog:enableLog withIAP:withIAP];
-		});
-		return;
+		NSLog(@"[TapTap ObjC] CRITICAL ERROR: Not on main thread! This should never happen!");
+		NSLog(@"[TapTap ObjC] Stack trace: %@", [NSThread callStackSymbols]);
 	}
 	
-	NSLog(@"[TapTap] Initializing SDK on main thread");
+	NSLog(@"[TapTap ObjC] About to call [TapTapSDK initWithOptions]");
 	
 	// Initialize TapTap SDK
 	TapTapSdkOptions *options = [[TapTapSdkOptions alloc] init];
@@ -185,19 +183,16 @@ typedef PoolStringArray GodotStringArray;
 }
 
 - (void)loginWithProfile:(BOOL)useProfile friends:(BOOL)useFriends {
-	NSLog(@"[TapTap] loginWithProfile called on thread: %@", [NSThread currentThread]);
-	NSLog(@"[TapTap] Login called with useProfile: %d, useFriends: %d", useProfile, useFriends);
+	NSLog(@"[TapTap ObjC] loginWithProfile called");
+	NSLog(@"[TapTap ObjC] Thread: %@", [NSThread currentThread]);
+	NSLog(@"[TapTap ObjC] IsMainThread: %d", [NSThread isMainThread]);
+	NSLog(@"[TapTap ObjC] useProfile: %d, useFriends: %d", useProfile, useFriends);
 	
-	// CRITICAL: TapTap Login must be called on main thread for UI operations
+	// Thread checking is done at C++ layer
 	if (![NSThread isMainThread]) {
-		NSLog(@"[TapTap] WARNING: Not on main thread, dispatching login to main thread");
-		dispatch_async(dispatch_get_main_queue(), ^{
-			[self loginWithProfile:useProfile friends:useFriends];
-		});
-		return;
+		NSLog(@"[TapTap ObjC] CRITICAL ERROR: Not on main thread! This should never happen!");
+		NSLog(@"[TapTap ObjC] Stack trace: %@", [NSThread callStackSymbols]);
 	}
-	
-	NSLog(@"[TapTap] Processing login on main thread");
 	
 	NSMutableArray *scopes = [NSMutableArray array];
 	if (useProfile) {
@@ -304,19 +299,21 @@ typedef PoolStringArray GodotStringArray;
 		return;
 	}
 	
-	// CRITICAL: TapTap Compliance must be called on main thread
+	NSLog(@"[TapTap ObjC] Thread: %@", [NSThread currentThread]);
+	NSLog(@"[TapTap ObjC] IsMainThread: %d", [NSThread isMainThread]);
+	
+	// Thread checking is done at C++ layer
 	if (![NSThread isMainThread]) {
-		NSLog(@"[TapTap] WARNING: Not on main thread, dispatching compliance to main thread");
-		dispatch_async(dispatch_get_main_queue(), ^{
-			[self startComplianceWithUserId:userId];
-		});
-		return;
+		NSLog(@"[TapTap ObjC] CRITICAL ERROR: Not on main thread! This should never happen!");
+		NSLog(@"[TapTap ObjC] Stack trace: %@", [NSThread callStackSymbols]);
 	}
 	
-	NSLog(@"[TapTap] Starting compliance on main thread");
+	NSLog(@"[TapTap ObjC] About to call [TapTapCompliance startup]");
 	
 	// Call TapTap Compliance SDK
 	[TapTapCompliance startup:userId];
+	
+	NSLog(@"[TapTap ObjC] [TapTapCompliance startup] returned");
 	
 	// Callback will be received via complianceCallbackWithCode:extra:
 }
@@ -496,6 +493,11 @@ void Godot3TapTap::_post_event(Variant p_event) {
 
 // SDK Initialization
 void Godot3TapTap::initSdk(const String &p_client_id, const String &p_client_token, bool p_enable_log, bool p_with_iap) {
+	NSLog(@"[TapTap C++] initSdk called");
+	NSLog(@"[TapTap C++] Thread: %@", [NSThread currentThread]);
+	NSLog(@"[TapTap C++] IsMainThread: %d", [NSThread isMainThread]);
+	NSLog(@"[TapTap C++] ClientId: %s, enableLog: %d, withIAP: %d", p_client_id.utf8().get_data(), p_enable_log, p_with_iap);
+	
 	client_id = p_client_id;
 	client_token = p_client_token;
 	sdk_initialized = true;
@@ -503,19 +505,68 @@ void Godot3TapTap::initSdk(const String &p_client_id, const String &p_client_tok
 	NSString *nsClientId = [NSString stringWithUTF8String:p_client_id.utf8().get_data()];
 	NSString *nsClientToken = [NSString stringWithUTF8String:p_client_token.utf8().get_data()];
 	
+	// CRITICAL: Force main thread execution for TapTap SDK init
+	if (![NSThread isMainThread]) {
+		NSLog(@"[TapTap C++] WARNING: Called from background thread, dispatching to main thread");
+		NSLog(@"[TapTap C++] Stack trace: %@", [NSThread callStackSymbols]);
+		dispatch_async(dispatch_get_main_queue(), ^{
+			NSLog(@"[TapTap C++] Now on main thread, calling ObjC delegate");
+			[taptap_delegate initSDKWithClientId:nsClientId clientToken:nsClientToken enableLog:p_enable_log withIAP:p_with_iap];
+		});
+		return;
+	}
+	
+	NSLog(@"[TapTap C++] Already on main thread, calling ObjC delegate directly");
 	[taptap_delegate initSDKWithClientId:nsClientId clientToken:nsClientToken enableLog:p_enable_log withIAP:p_with_iap];
+	NSLog(@"[TapTap C++] initSdk returned");
 }
 
 void Godot3TapTap::initSdkWithEncryptedToken(const String &p_client_id, const String &p_encrypted_token, bool p_enable_log, bool p_with_iap) {
+	NSLog(@"[TapTap C++] initSdkWithEncryptedToken called");
+	NSLog(@"[TapTap C++] Thread: %@", [NSThread currentThread]);
+	NSLog(@"[TapTap C++] IsMainThread: %d", [NSThread isMainThread]);
+	
 	client_id = p_client_id;
 	sdk_initialized = true;
 	
+	// CRITICAL: Decrypt and init must happen on main thread
+	if (![NSThread isMainThread]) {
+		NSLog(@"[TapTap C++] WARNING: Called from background thread, dispatching entire flow to main thread");
+		NSLog(@"[TapTap C++] Stack trace: %@", [NSThread callStackSymbols]);
+		
+		// Capture all parameters for the block
+		String client_id_copy = p_client_id;
+		String encrypted_token_copy = p_encrypted_token;
+		
+		dispatch_async(dispatch_get_main_queue(), ^{
+			NSLog(@"[TapTap C++] Now on main thread, decrypting token");
+			NSString *nsEncryptedToken = [NSString stringWithUTF8String:encrypted_token_copy.utf8().get_data()];
+			NSString *nsDecryptedToken = [taptap_delegate decryptToken:nsEncryptedToken];
+			
+			if (!nsDecryptedToken || nsDecryptedToken.length == 0) {
+				NSLog(@"[TapTap C++] Failed to decrypt token");
+				Dictionary ret;
+				ret["type"] = "init";
+				ret["result"] = "error";
+				ret["message"] = "Failed to decrypt token";
+				Godot3TapTap::get_singleton()->_post_event(ret);
+				return;
+			}
+			
+			NSString *nsClientId = [NSString stringWithUTF8String:client_id_copy.utf8().get_data()];
+			NSLog(@"[TapTap C++] Token decrypted, calling ObjC delegate");
+			[taptap_delegate initSDKWithClientId:nsClientId clientToken:nsDecryptedToken enableLog:p_enable_log withIAP:p_with_iap];
+		});
+		return;
+	}
+	
+	NSLog(@"[TapTap C++] Already on main thread, decrypting token");
 	// Decrypt the token using the key from Info.plist
 	NSString *nsEncryptedToken = [NSString stringWithUTF8String:p_encrypted_token.utf8().get_data()];
 	NSString *nsDecryptedToken = [taptap_delegate decryptToken:nsEncryptedToken];
 	
 	if (!nsDecryptedToken || nsDecryptedToken.length == 0) {
-		NSLog(@"[TapTap] Failed to decrypt token, SDK initialization aborted");
+		NSLog(@"[TapTap C++] Failed to decrypt token, SDK initialization aborted");
 		Dictionary ret;
 		ret["type"] = "init";
 		ret["result"] = "error";
@@ -525,12 +576,30 @@ void Godot3TapTap::initSdkWithEncryptedToken(const String &p_client_id, const St
 	}
 	
 	String decrypted_token = String::utf8([nsDecryptedToken UTF8String]);
+	NSLog(@"[TapTap C++] Token decrypted, calling initSdk");
 	initSdk(p_client_id, decrypted_token, p_enable_log, p_with_iap);
 }
 
 // Login
 void Godot3TapTap::login(bool p_use_profile, bool p_use_friends) {
+	NSLog(@"[TapTap C++] login called");
+	NSLog(@"[TapTap C++] Thread: %@", [NSThread currentThread]);
+	NSLog(@"[TapTap C++] IsMainThread: %d", [NSThread isMainThread]);
+	
+	// CRITICAL: Force main thread execution for UI operations
+	if (![NSThread isMainThread]) {
+		NSLog(@"[TapTap C++] WARNING: Called from background thread, dispatching to main thread");
+		NSLog(@"[TapTap C++] Stack trace: %@", [NSThread callStackSymbols]);
+		dispatch_async(dispatch_get_main_queue(), ^{
+			NSLog(@"[TapTap C++] Now on main thread, calling ObjC delegate");
+			[taptap_delegate loginWithProfile:p_use_profile friends:p_use_friends];
+		});
+		return;
+	}
+	
+	NSLog(@"[TapTap C++] Already on main thread, calling ObjC delegate directly");
 	[taptap_delegate loginWithProfile:p_use_profile friends:p_use_friends];
+	NSLog(@"[TapTap C++] login returned");
 }
 
 bool Godot3TapTap::isLogin() {
@@ -563,6 +632,30 @@ void Godot3TapTap::logoutThenRestart() {
 
 // Compliance (Anti-addiction)
 void Godot3TapTap::compliance() {
+	NSLog(@"[TapTap C++] compliance called");
+	NSLog(@"[TapTap C++] Thread: %@", [NSThread currentThread]);
+	NSLog(@"[TapTap C++] IsMainThread: %d", [NSThread isMainThread]);
+	
+	// CRITICAL: Force main thread execution for compliance
+	if (![NSThread isMainThread]) {
+		NSLog(@"[TapTap C++] WARNING: Called from background thread, dispatching to main thread");
+		NSLog(@"[TapTap C++] Stack trace: %@", [NSThread callStackSymbols]);
+		dispatch_async(dispatch_get_main_queue(), ^{
+			NSLog(@"[TapTap C++] Now on main thread, getting userId");
+			NSString *userId = [taptap_delegate currentUserId];
+			if (!userId || userId.length == 0) {
+				TapTapAccount *account = [TapTapLogin getCurrentTapAccount];
+				if (account && account.userInfo && account.userInfo.openId) {
+					userId = account.userInfo.openId;
+				}
+			}
+			NSLog(@"[TapTap C++] Calling ObjC delegate with userId: %@", userId);
+			[taptap_delegate startComplianceWithUserId:userId];
+		});
+		return;
+	}
+	
+	NSLog(@"[TapTap C++] Already on main thread, getting userId");
 	// Use stored user ID from login, or openId from current account
 	NSString *userId = [taptap_delegate currentUserId];
 	if (!userId || userId.length == 0) {
@@ -572,7 +665,9 @@ void Godot3TapTap::compliance() {
 		}
 	}
 	
+	NSLog(@"[TapTap C++] Calling ObjC delegate with userId: %@", userId);
 	[taptap_delegate startComplianceWithUserId:userId];
+	NSLog(@"[TapTap C++] compliance returned");
 }
 
 // License Verification
