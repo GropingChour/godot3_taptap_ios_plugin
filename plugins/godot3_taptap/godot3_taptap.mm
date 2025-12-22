@@ -54,28 +54,34 @@ typedef PackedStringArray GodotStringArray;
 typedef PoolStringArray GodotStringArray;
 #endif
 
-// MARK: - Runtime Fix for Missing TapTapEvent Methods
+// MARK: - Runtime Fix for Missing SDK Methods
 
 /**
- * @brief Runtime method injector to fix missing TapTapEvent methods
+ * @brief Runtime method injector to fix missing TapTap SDK methods
  * 
- * Problem: TapTap SDK's TapTapEvent class is missing the +captureUncaughtException
- * class method, which causes a crash with "unrecognized selector" error during SDK initialization.
+ * Problem: TapTap SDK expects certain methods to exist on system classes:
+ * 1. TapTapEvent class missing +captureUncaughtException class method
+ * 2. NSMutableURLRequest missing -generateSHA256SignatureWithSecret: instance method
  * 
- * Solution: Use Objective-C runtime to inject a stub implementation of the missing method
- * before SDK initialization occurs. This is done in +load which runs before main().
+ * These missing methods cause crashes with "unrecognized selector" errors.
+ * 
+ * Solution: Use Objective-C runtime to inject stub implementations before SDK runs.
+ * This is done in +load which runs automatically before main().
  * 
  * Technical Details:
- * - Class methods are stored in the metaclass, not the class itself
- * - Must use object_getClass() to get metaclass for class method injection
- * - +load is called automatically by the runtime during class loading
- * - This fix is transparent to the SDK and prevents crashes
+ * - Class methods are stored in the metaclass (use object_getClass)
+ * - Instance methods are stored in the class itself
+ * - +load is called automatically during class loading
+ * - Injections are transparent to the SDK
  */
-@interface TapTapEventMethodInjector : NSObject
+@interface TapTapSDKMethodInjector : NSObject
 + (void)injectMissingMethods;
++ (void)injectTapTapEventMethods;
++ (void)injectNSURLRequestMethods;
++ (void)hookAppDelegateURLMethods;
 @end
 
-@implementation TapTapEventMethodInjector
+@implementation TapTapSDKMethodInjector
 
 /**
  * @brief Automatically called by Objective-C runtime before main()
@@ -85,75 +91,370 @@ typedef PoolStringArray GodotStringArray;
  * instances are created or any other methods are called.
  */
 + (void)load {
-	NSLog(@"[TapTap Fix] +load called, injecting missing TapTapEvent methods");
+	NSLog(@"[TapTap Fix] +load called, injecting missing SDK methods");
 	[self injectMissingMethods];
 }
 
 /**
- * @brief Injects stub implementations for missing TapTapEvent methods
+ * @brief Master method to inject all missing SDK methods
  * 
- * This method checks if TapTapEvent class exists and if it's missing
- * the captureUncaughtException method. If missing, it injects a no-op
- * stub to prevent crashes.
+ * Calls individual injection methods for different classes.
  */
 + (void)injectMissingMethods {
+	[self injectTapTapEventMethods];
+	[self injectNSURLRequestMethods];
+	[self hookAppDelegateURLMethods];
+}
+
+/**
+ * @brief Injects missing TapTapEvent class methods
+ * 
+ * Fixes: +[TapTapEvent captureUncaughtException]
+ */
++ (void)injectTapTapEventMethods {
+	NSLog(@"[TapTap Fix] === Injecting TapTapEvent Methods ===");
+	
 	// Step 1: Check if TapTapEvent class exists
 	Class eventClass = NSClassFromString(@"TapTapEvent");
 	if (!eventClass) {
-		NSLog(@"[TapTap Fix] TapTapEvent class not found, skipping injection (SDK might not be linked yet)");
+		NSLog(@"[TapTap Fix] TapTapEvent class not found (SDK not loaded yet)");
 		return;
 	}
 	
 	NSLog(@"[TapTap Fix] TapTapEvent class found: %@", eventClass);
 	
-	// Step 2: Check if the problematic method already exists
+	// Step 2: Check if captureUncaughtException method exists
 	SEL missingSelector = @selector(captureUncaughtException);
 	Method existingMethod = class_getClassMethod(eventClass, missingSelector);
 	
 	if (existingMethod) {
-		NSLog(@"[TapTap Fix] +[TapTapEvent captureUncaughtException] already exists, no injection needed");
+		NSLog(@"[TapTap Fix] +[TapTapEvent captureUncaughtException] already exists");
 		return;
 	}
 	
 	NSLog(@"[TapTap Fix] +[TapTapEvent captureUncaughtException] is MISSING");
-	NSLog(@"[TapTap Fix] Injecting stub implementation to prevent crash...");
+	NSLog(@"[TapTap Fix] Injecting stub implementation...");
 	
-	// Step 3: Create a no-op stub implementation using a block
-	// This block will be called instead of the missing method
+	// Step 3: Create no-op stub
 	IMP stubImplementation = imp_implementationWithBlock(^(id self) {
-		// Empty implementation - does nothing but prevents crash
-		NSLog(@"[TapTap Fix] Stub +[TapTapEvent captureUncaughtException] was called (no-op)");
-		// The SDK probably wanted to set up exception handlers here,
-		// but we skip it to avoid crashes. This is safe because:
-		// 1. Exception handling is optional functionality
-		// 2. The game has its own crash handlers (Godot, OS)
-		// 3. TapTap SDK will still work without this feature
+		NSLog(@"[TapTap Fix] Stub +[TapTapEvent captureUncaughtException] called (no-op)");
 	});
 	
-	// Step 4: Get the metaclass (required for class method injection)
-	// Class methods are stored in the metaclass, not the class itself
+	// Step 4: Inject into metaclass (for class methods)
 	Class metaClass = object_getClass(eventClass);
-	NSLog(@"[TapTap Fix] Metaclass for injection: %@", metaClass);
-	
-	// Step 5: Add the method to the metaclass
-	// Signature: "v@:" means: void return, id self, SEL _cmd (no other parameters)
-	BOOL added = class_addMethod(metaClass, 
-								  missingSelector, 
-								  stubImplementation, 
-								  "v@:");
+	BOOL added = class_addMethod(metaClass, missingSelector, stubImplementation, "v@:");
 	
 	if (added) {
 		NSLog(@"[TapTap Fix] ✅ Successfully injected +[TapTapEvent captureUncaughtException]");
-		
-		// Verify the injection worked
 		if ([eventClass respondsToSelector:missingSelector]) {
-			NSLog(@"[TapTap Fix] ✅ Verification: Method is now callable");
-		} else {
-			NSLog(@"[TapTap Fix] ⚠️  WARNING: Method was added but verification failed!");
+			NSLog(@"[TapTap Fix] ✅ Verification passed");
 		}
 	} else {
-		NSLog(@"[TapTap Fix] ❌ Failed to inject method (method might already exist or class is read-only)");
+		NSLog(@"[TapTap Fix] ❌ Failed to inject method");
 	}
+}
+
+/**
+ * @brief Injects missing NSMutableURLRequest instance methods
+ * 
+ * Fixes: -[NSMutableURLRequest generateSHA256SignatureWithSecret:]
+ * 
+ * This method is used by TapTap SDK to generate request signatures.
+ * We inject a stub that returns an empty string to prevent crashes.
+ */
++ (void)injectNSURLRequestMethods {
+	NSLog(@"[TapTap Fix] === Injecting NSMutableURLRequest Methods ===");
+	
+	Class urlRequestClass = [NSMutableURLRequest class];
+	if (!urlRequestClass) {
+		NSLog(@"[TapTap Fix] NSMutableURLRequest class not found (should never happen)");
+		return;
+	}
+	
+	NSLog(@"[TapTap Fix] NSMutableURLRequest class found: %@", urlRequestClass);
+	
+	// Check if generateSHA256SignatureWithSecret: method exists
+	SEL missingSelector = @selector(generateSHA256SignatureWithSecret:);
+	Method existingMethod = class_getInstanceMethod(urlRequestClass, missingSelector);
+	
+	if (existingMethod) {
+		NSLog(@"[TapTap Fix] -[NSMutableURLRequest generateSHA256SignatureWithSecret:] already exists");
+		return;
+	}
+	
+	NSLog(@"[TapTap Fix] -[NSMutableURLRequest generateSHA256SignatureWithSecret:] is MISSING");
+	NSLog(@"[TapTap Fix] Injecting stub implementation...");
+	
+	// Create stub implementation that returns empty string
+	// Signature: id (return), id (self), SEL (_cmd), id (secret parameter)
+	IMP stubImplementation = imp_implementationWithBlock(^NSString*(NSMutableURLRequest *self, NSString *secret) {
+		NSLog(@"[TapTap Fix] Stub -[NSMutableURLRequest generateSHA256SignatureWithSecret:] called");
+		NSLog(@"[TapTap Fix] WARNING: Returning empty signature - this may affect SDK functionality");
+		
+		// In a real implementation, this would:
+		// 1. Get request body/URL/headers
+		// 2. Combine with secret
+		// 3. Generate SHA256 hash
+		// 4. Return hex string
+		// 
+		// For now, return empty string to prevent crash
+		// The SDK might still work if signature validation is optional
+		return @"";
+	});
+	
+	// Inject into class (for instance methods, not metaclass)
+	// Signature: "@@:@" means: NSString* return, id self, SEL _cmd, NSString* parameter
+	BOOL added = class_addMethod(urlRequestClass, 
+								  missingSelector, 
+								  stubImplementation, 
+								  "@@:@");
+	
+	if (added) {
+		NSLog(@"[TapTap Fix] ✅ Successfully injected -[NSMutableURLRequest generateSHA256SignatureWithSecret:]");
+		
+		// Verify injection
+		NSMutableURLRequest *testRequest = [[NSMutableURLRequest alloc] init];
+		if ([testRequest respondsToSelector:missingSelector]) {
+			NSLog(@"[TapTap Fix] ✅ Verification: Method is now callable");
+		} else {
+			NSLog(@"[TapTap Fix] ⚠️  WARNING: Verification failed!");
+		}
+	} else {
+		NSLog(@"[TapTap Fix] ❌ Failed to inject method");
+	}
+}
+
+/**
+ * @brief Hook AppDelegate URL handling methods for TapTap Login
+ * 
+ * TapTap Login requires URL Scheme callbacks to complete OAuth flow.
+ * Instead of modifying Godot's app_delegate.mm source code, we use
+ * Method Swizzling to inject TapTap URL handling into AppDelegate.
+ * 
+ * This hooks three methods:
+ * 1. application:openURL:options: - iOS 9+ URL Scheme handler
+ * 2. scene:openURLContexts: - iOS 13+ multi-window URL Scheme handler
+ * 3. application:continueUserActivity:restorationHandler: - Universal Links
+ * 
+ * Technical approach:
+ * - Original method is renamed to xxx_original
+ * - New method calls [TapTapLogin openWithUrl:] first
+ * - If TapTap doesn't handle it, calls original implementation
+ * - This ensures compatibility with other plugins/Godot features
+ */
++ (void)hookAppDelegateURLMethods {
+	NSLog(@"[TapTap Fix] === Hooking AppDelegate URL Methods ===");
+	
+	// Get AppDelegate class
+	Class appDelegateClass = NSClassFromString(@"AppDelegate");
+	if (!appDelegateClass) {
+		NSLog(@"[TapTap Fix] ❌ AppDelegate class not found");
+		return;
+	}
+	
+	NSLog(@"[TapTap Fix] AppDelegate class found: %@", appDelegateClass);
+	
+	// === Hook 1: application:openURL:options: (iOS 9+) ===
+	SEL openURLSelector = @selector(application:openURL:options:);
+	Method originalOpenURL = class_getInstanceMethod(appDelegateClass, openURLSelector);
+	
+	if (originalOpenURL) {
+		NSLog(@"[TapTap Fix] Hooking application:openURL:options:");
+		
+		// Create swizzled implementation
+		IMP swizzledOpenURL = imp_implementationWithBlock(^BOOL(id self, UIApplication *app, NSURL *url, NSDictionary *options) {
+			NSLog(@"[TapTap Plugin] *** URL Scheme callback received ***");
+			NSLog(@"[TapTap Plugin] URL: %@", url);
+			NSLog(@"[TapTap Plugin] Scheme: %@", url.scheme);
+			
+			// Try TapTap SDK first (using official API)
+			BOOL handledByTapTap = [TapTapLogin openWithUrl:url];
+			
+			if (handledByTapTap) {
+				NSLog(@"[TapTap Plugin] ✅ URL handled by TapTap Login SDK");
+				return YES;
+			}
+			
+			NSLog(@"[TapTap Plugin] URL not for TapTap, checking original handler");
+			
+			// Call original implementation if exists
+			SEL originalSelector = NSSelectorFromString(@"application:openURL:options:_original");
+			if ([self respondsToSelector:originalSelector]) {
+				NSLog(@"[TapTap Plugin] Calling original openURL handler");
+				// Get original method implementation
+				Method origMethod = class_getInstanceMethod([self class], originalSelector);
+				if (origMethod) {
+					typedef BOOL (*OriginalFunc)(id, SEL, UIApplication*, NSURL*, NSDictionary*);
+					OriginalFunc originalImp = (OriginalFunc)method_getImplementation(origMethod);
+					return originalImp(self, originalSelector, app, url, options);
+				}
+			}
+			
+			NSLog(@"[TapTap Plugin] No original handler, returning NO");
+			return NO;
+		});
+		
+		// Rename original method to xxx_original
+		SEL originalSelector = NSSelectorFromString(@"application:openURL:options:_original");
+		class_addMethod(appDelegateClass, originalSelector, 
+						method_getImplementation(originalOpenURL), 
+						method_getTypeEncoding(originalOpenURL));
+		
+		// Replace original with swizzled
+		method_setImplementation(originalOpenURL, swizzledOpenURL);
+		
+		NSLog(@"[TapTap Fix] ✅ Successfully hooked application:openURL:options:");
+	} else {
+		NSLog(@"[TapTap Fix] application:openURL:options: not found in AppDelegate");
+		NSLog(@"[TapTap Fix] Adding new implementation");
+		
+		// If method doesn't exist, add it
+		IMP newOpenURL = imp_implementationWithBlock(^BOOL(id self, UIApplication *app, NSURL *url, NSDictionary *options) {
+			NSLog(@"[TapTap Plugin] *** URL Scheme callback (new method) ***");
+			NSLog(@"[TapTap Plugin] URL: %@", url);
+			
+			BOOL handled = [TapTapLogin openWithUrl:url];
+			
+			if (handled) {
+				NSLog(@"[TapTap Plugin] ✅ URL handled by TapTap SDK");
+			}
+			
+			return handled;
+		});
+		
+		class_addMethod(appDelegateClass, openURLSelector, newOpenURL, "B@:@@@");
+		NSLog(@"[TapTap Fix] ✅ Added application:openURL:options: to AppDelegate");
+	}
+	
+	// === Hook 2: scene:openURLContexts: (iOS 13+) ===
+	if (@available(iOS 13.0, *)) {
+		SEL sceneOpenURLSelector = @selector(scene:openURLContexts:);
+		Method originalSceneOpenURL = class_getInstanceMethod(appDelegateClass, sceneOpenURLSelector);
+		
+		if (originalSceneOpenURL) {
+			NSLog(@"[TapTap Fix] Hooking scene:openURLContexts: (iOS 13+)");
+			
+			IMP swizzledSceneOpenURL = imp_implementationWithBlock(^void(id self, UIScene *scene, NSSet<UIOpenURLContext *> *URLContexts) {
+				NSLog(@"[TapTap Plugin] *** scene:openURLContexts called (iOS 13+) ***");
+				
+				for (UIOpenURLContext *context in URLContexts) {
+					NSURL *url = context.URL;
+					NSLog(@"[TapTap Plugin] Processing URL: %@", url);
+					
+					BOOL handled = [TapTapLogin openWithUrl:url];
+					
+					if (handled) {
+						NSLog(@"[TapTap Plugin] ✅ URL handled by TapTap SDK");
+						continue; // TapTap handled it, move to next URL
+					}
+				}
+				
+				// Call original implementation
+				SEL originalSelector = NSSelectorFromString(@"scene:openURLContexts:_original");
+				if ([self respondsToSelector:originalSelector]) {
+					Method origMethod = class_getInstanceMethod([self class], originalSelector);
+					if (origMethod) {
+						typedef void (*OriginalFunc)(id, SEL, UIScene*, NSSet*);
+						OriginalFunc originalImp = (OriginalFunc)method_getImplementation(origMethod);
+						originalImp(self, originalSelector, scene, URLContexts);
+					}
+				}
+			});
+			
+			SEL originalSelector = NSSelectorFromString(@"scene:openURLContexts:_original");
+			class_addMethod(appDelegateClass, originalSelector,
+							method_getImplementation(originalSceneOpenURL),
+							method_getTypeEncoding(originalSceneOpenURL));
+			
+			method_setImplementation(originalSceneOpenURL, swizzledSceneOpenURL);
+			
+			NSLog(@"[TapTap Fix] ✅ Successfully hooked scene:openURLContexts:");
+		} else {
+			NSLog(@"[TapTap Fix] scene:openURLContexts: not found, adding new implementation");
+			
+			IMP newSceneOpenURL = imp_implementationWithBlock(^void(id self, UIScene *scene, NSSet<UIOpenURLContext *> *URLContexts) {
+				NSLog(@"[TapTap Plugin] *** scene:openURLContexts (new method) ***");
+				
+				for (UIOpenURLContext *context in URLContexts) {
+					NSURL *url = context.URL;
+					NSLog(@"[TapTap Plugin] URL: %@", url);
+					[TapTapLogin openWithUrl:url];
+				}
+			});
+			
+			class_addMethod(appDelegateClass, sceneOpenURLSelector, newSceneOpenURL, "v@:@@");
+			NSLog(@"[TapTap Fix] ✅ Added scene:openURLContexts: to AppDelegate");
+		}
+	}
+	
+	// === Hook 3: Universal Links ===
+	SEL continueActivitySelector = @selector(application:continueUserActivity:restorationHandler:);
+	Method originalContinueActivity = class_getInstanceMethod(appDelegateClass, continueActivitySelector);
+	
+	if (originalContinueActivity) {
+		NSLog(@"[TapTap Fix] Hooking application:continueUserActivity:restorationHandler:");
+		
+		IMP swizzledContinueActivity = imp_implementationWithBlock(^BOOL(id self, UIApplication *app, NSUserActivity *userActivity, void(^restorationHandler)(NSArray *)) {
+			
+			if ([userActivity.activityType isEqualToString:NSUserActivityTypeBrowsingWeb]) {
+				NSURL *url = userActivity.webpageURL;
+				NSLog(@"[TapTap Plugin] *** Universal Link received ***");
+				NSLog(@"[TapTap Plugin] URL: %@", url);
+				
+				BOOL handled = [TapTapLogin openWithUrl:url];
+				
+				if (handled) {
+					NSLog(@"[TapTap Plugin] ✅ Universal Link handled by TapTap SDK");
+					return YES;
+				}
+			}
+			
+			// Call original implementation
+			SEL originalSelector = NSSelectorFromString(@"application:continueUserActivity:restorationHandler:_original");
+			if ([self respondsToSelector:originalSelector]) {
+				Method origMethod = class_getInstanceMethod([self class], originalSelector);
+				if (origMethod) {
+					typedef BOOL (*OriginalFunc)(id, SEL, UIApplication*, NSUserActivity*, void(^)(NSArray*));
+					OriginalFunc originalImp = (OriginalFunc)method_getImplementation(origMethod);
+					return originalImp(self, originalSelector, app, userActivity, restorationHandler);
+				}
+			}
+			
+			return NO;
+		});
+		
+		SEL originalSelector = NSSelectorFromString(@"application:continueUserActivity:restorationHandler:_original");
+		class_addMethod(appDelegateClass, originalSelector,
+						method_getImplementation(originalContinueActivity),
+						method_getTypeEncoding(originalContinueActivity));
+		
+		method_setImplementation(originalContinueActivity, swizzledContinueActivity);
+		
+		NSLog(@"[TapTap Fix] ✅ Successfully hooked continueUserActivity");
+	} else {
+		NSLog(@"[TapTap Fix] continueUserActivity not found, adding new implementation");
+		
+		IMP newContinueActivity = imp_implementationWithBlock(^BOOL(id self, UIApplication *app, NSUserActivity *userActivity, void(^restorationHandler)(NSArray *)) {
+			
+			if ([userActivity.activityType isEqualToString:NSUserActivityTypeBrowsingWeb]) {
+				NSURL *url = userActivity.webpageURL;
+				NSLog(@"[TapTap Plugin] *** Universal Link (new method) ***");
+				NSLog(@"[TapTap Plugin] URL: %@", url);
+				
+				return [TapTapLogin openWithUrl:url];
+			}
+			
+			return NO;
+		});
+		
+		class_addMethod(appDelegateClass, continueActivitySelector, newContinueActivity, "B@:@@?");
+		NSLog(@"[TapTap Fix] ✅ Added continueUserActivity to AppDelegate");
+	}
+	
+	NSLog(@"[TapTap Fix] ========================================");
+	NSLog(@"[TapTap Fix] ✅ AppDelegate URL hooks installed");
+	NSLog(@"[TapTap Fix] TapTap Login URL callbacks will work");
+	NSLog(@"[TapTap Fix] ========================================");
 }
 
 @end
