@@ -497,18 +497,51 @@ typedef PoolStringArray GodotStringArray;
 	return [TapTapLogin getCurrentTapAccount] != nil;
 }
 
+/**
+ * @brief Get current user profile from TapTap SDK
+ * 
+ * Returns a consistent Dictionary structure regardless of login state.
+ * This ensures GDScript code can safely access fields without checking.
+ * 
+ * @return Dictionary with user profile fields:
+ *   - openId: User's unique identifier (empty if not logged in)
+ *   - unionId: User's union identifier (empty if not logged in)
+ *   - name: User's display name (empty if not logged in)
+ *   - avatar: User's avatar URL (empty if not logged in)
+ *   - error: Error message if user is not logged in
+ */
 - (NSDictionary *)getUserProfile {
-	// Get user profile from TapTap SDK
+	NSLog(@"[TapTap ObjC] getUserProfile called");
+	
+	// Get current TapTap account
 	TapTapAccount *account = [TapTapLogin getCurrentTapAccount];
+	
 	if (account && account.userInfo) {
-		return @{
+		// User is logged in, return full profile
+		NSDictionary *profile = @{
 			@"openId": account.userInfo.openId ?: @"",
 			@"unionId": account.userInfo.unionId ?: @"",
 			@"name": account.userInfo.name ?: @"",
 			@"avatar": account.userInfo.avatar ?: @""
 		};
+		
+		NSLog(@"[TapTap ObjC] User profile found: openId=%@, name=%@", 
+			  account.userInfo.openId ?: @"(null)", 
+			  account.userInfo.name ?: @"(null)");
+		
+		return profile;
 	}
-	return @{};
+	
+	// User is NOT logged in - return consistent structure with empty values
+	// This prevents GDScript errors when trying to access profile.name
+	NSLog(@"[TapTap ObjC] User not logged in, returning empty profile with error");
+	return @{
+		@"openId": @"",
+		@"unionId": @"",
+		@"name": @"",
+		@"avatar": @"",
+		@"error": @"User not logged in"
+	};
 }
 
 - (void)logout {
