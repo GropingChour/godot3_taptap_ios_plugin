@@ -158,8 +158,8 @@ typedef PoolStringArray GodotStringArray;
 	
 	if (account && account.userInfo) {
 		return @{
-			@"openId": account.openId ?: @"",
-			@"unionId": account.unionId ?: @"",
+			@"openId": account.userInfo.openId ?: @"",
+			@"unionId": account.userInfo.unionId ?: @"",
 			@"name": account.userInfo.name ?: @"",
 			@"avatar": account.userInfo.avatar ?: @""
 		};
