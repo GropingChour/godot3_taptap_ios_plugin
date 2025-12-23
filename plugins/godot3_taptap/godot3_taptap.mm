@@ -322,8 +322,8 @@ void Godot3TapTap::compliance() {
 	}
 	
 	TapTapAccount *account = [TapTapLogin getCurrentTapAccount];
-	if (account && account.unionId) {
-		[taptap_delegate startComplianceWithUserId:account.unionId];
+	if (account && account.userInfo && account.userInfo.unionId) {
+		[taptap_delegate startComplianceWithUserId:account.userInfo.unionId];
 	}
 }
 
