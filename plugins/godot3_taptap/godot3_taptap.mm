@@ -83,7 +83,8 @@ typedef PoolStringArray GodotStringArray;
 }
 
 - (void)initSDKWithClientId:(NSString *)clientId clientToken:(NSString *)clientToken enableLog:(BOOL)enableLog {
-	dispatch_async(dispatch_get_main_queue(), ^{
+	// dispatch_async(dispatch_get_main_queue(), ^{
+		NSLog(@"[TapTap] SDK init with clientId: %@, clientToken: %@", clientId, clientToken);
 		self.clientId = clientId;
 		self.clientToken = clientToken;
 		
@@ -93,24 +94,16 @@ typedef PoolStringArray GodotStringArray;
 		options.region = TapTapRegionTypeCN;
 		options.enableLog = enableLog;
 		
-		@try {
-			[TapTapSDK initWithOptions:options];
-			self.sdkInitialized = YES;
-			
-			Dictionary ret;
-			ret["type"] = "init";
-			ret["result"] = "ok";
-			Godot3TapTap::get_singleton()->_post_event(ret);
-		} @catch (NSException *exception) {
-			NSLog(@"[TapTap] SDK init failed: %@", exception.reason);
-			
-			Dictionary ret;
-			ret["type"] = "init";
-			ret["result"] = "error";
-			ret["message"] = String::utf8([exception.reason UTF8String]);
-			Godot3TapTap::get_singleton()->_post_event(ret);
-		}
-	});
+
+		[TapTapSDK initWithOptions:options];
+		self.sdkInitialized = YES;
+
+		Dictionary ret;
+		ret["type"] = "init";
+		ret["result"] = "ok";
+		Godot3TapTap::get_singleton()->_post_event(ret);
+
+	// });
 }
 
 - (void)loginWithProfile:(BOOL)useProfile friends:(BOOL)useFriends {

@@ -40,7 +40,7 @@ CFBundleURLTypes:raw="
 		<string>taptap</string>
 		<key>CFBundleURLSchemes</key>
 		<array>
-			<string>open-taptap-wpyjvbc5f2jnqqlgfr</string>
+			<string>ttwpyjvbc5f2jnqqlgfr</string>
 		</array>
 	</dict>
 </array>
