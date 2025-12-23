@@ -120,7 +120,7 @@ typedef PoolStringArray GodotStringArray;
 		NSArray *otherOptions = @[complianceOptions];
 
 		// TapSDK 初始化
-		[TapTapSDK initWithOptions:coreOptions otherOptions:otherOptions];
+		[TapTapSDK initWithOptions:options otherOptions:otherOptions];
 		self.sdkInitialized = YES;
 
 		NSLog(@"[TapTap] SDK initialized");
