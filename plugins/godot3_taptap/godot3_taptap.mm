@@ -97,15 +97,30 @@ typedef PoolStringArray GodotStringArray;
 		options.region = TapTapRegionTypeCN;
 		options.enableLog = enableLog;
 		
-		// Method 1: Direct property (if exists)
-		if ([options respondsToSelector:@selector(setEnableAutoReport:)]) {
-			[options setValue:@NO forKey:@"enableAutoReport"];
-			NSLog(@"[TapTap ObjC] ✓ Disabled auto report via property");
+		// Method 2: TapTapEventOptions configuration
+		Class eventOptionsClass = NSClassFromString(@"TapTapEventOptions");
+		if (eventOptionsClass && [options respondsToSelector:@selector(setEventOptions:)]) {
+			id eventOptions = [[eventOptionsClass alloc] init];
+			if (eventOptions && [eventOptions respondsToSelector:@selector(setEnable:)]) {
+				[eventOptions setValue:@NO forKey:@"enable"];
+				[options setValue:eventOptions forKey:@"eventOptions"];
+				NSLog(@"[TapTap ObjC]   ✓ Disabled via TapTapEventOptions");
+			}
 		} else {
-			NSLog(@"[TapTap ObjC] ✗ enableAutoReport property not available");
+			NSLog(@"[TapTap ObjC]   ✗ TapTapEventOptions not available");
 		}
 
-		[TapTapSDK initWithOptions:options];
+		/// 合规认证配置
+		TapTapComplianceOptions *complianceOptions = [[TapTapComplianceOptions alloc] init];
+
+		complianceOptions.showSwitchAccount = YES; // 是否显示切换账号按钮
+		complianceOptions.useAgeRange = NO; // 游戏是否需要获取真实年龄段信息   
+
+		// 其他模块配置项
+		NSArray *otherOptions = @[complianceOptions];
+
+		// TapSDK 初始化
+		[TapTapSDK initWithOptions:coreOptions otherOptions:otherOptions];
 		self.sdkInitialized = YES;
 
 		NSLog(@"[TapTap] SDK initialized");
