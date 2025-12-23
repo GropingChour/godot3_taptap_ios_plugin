@@ -22,7 +22,7 @@ embedded=[
 ]
 system=["libz.1.tbd", "libc++.tbd"]
 
-linker_flags="-ObjC -all_load"
+linker_flags=["-ObjC"]
 
 capabilities=[]
 

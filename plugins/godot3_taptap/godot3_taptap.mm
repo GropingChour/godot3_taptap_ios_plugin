@@ -170,7 +170,21 @@ typedef PoolStringArray GodotStringArray;
 }
 
 - (BOOL)isLoggedIn {
-	return [TapTapLogin getCurrentTapAccount] != nil;
+	TapTapAccount *account = [TapTapLogin getCurrentTapAccount];
+	if (account != nil ){
+		AccessToken *token = account.accessToken;
+		UserInfo *userInfo = account.userInfo;
+		if (token != nil && userInfo != nil) {
+			// 用户已登录
+			return YES;
+		} else {
+			// 用户未登录
+			return NO;
+		}
+	} else {
+		// 用户未登录
+		return NO;
+	}
 }
 
 - (NSDictionary *)getUserProfile {
