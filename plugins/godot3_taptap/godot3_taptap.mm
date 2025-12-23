@@ -142,9 +142,7 @@ typedef PoolStringArray GodotStringArray;
 		
 		// 发起 Tap 登录
 		[TapTapLogin LoginWithScopes:scopes handler:^(BOOL isCancel, NSError * _Nullable error, TapTapAccount * _Nullable account) {
-			Dictionary ret;
-			ret["type"] = "login";
-			
+			NSLog(@"[TapTap] Login callback, isCancel: %d, error: %@, account: %@", isCancel, error, account);
 			if (isCancel){
 				Godot3TapTap::get_singleton()->emit_signal("onLoginCancel");
 			} else if (error != nil) {
