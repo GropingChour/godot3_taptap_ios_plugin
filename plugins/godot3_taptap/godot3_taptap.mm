@@ -125,16 +125,11 @@ typedef PoolStringArray GodotStringArray;
 
 		NSLog(@"[TapTap] SDK initialized");
 
-		Dictionary ret;
-		ret["type"] = "init";
-		ret["result"] = "ok";
-		Godot3TapTap::get_singleton()->_post_event(ret);
-
 	// });
 }
 
 - (void)loginWithProfile:(BOOL)useProfile friends:(BOOL)useFriends {
-	dispatch_async(dispatch_get_main_queue(), ^{
+	// dispatch_async(dispatch_get_main_queue(), ^{
 		NSMutableArray *scopes = [NSMutableArray array];
 		if (useProfile) {
 			[scopes addObject:@"public_profile"];
@@ -145,28 +140,21 @@ typedef PoolStringArray GodotStringArray;
 			[scopes addObject:@"user_friends"];
 		}
 		
-		[TapTapLogin LoginWithScopes:scopes viewController:nil handler:^(BOOL success, NSError *error, TapTapAccount *account) {
+		// 发起 Tap 登录
+		[TapTapLogin LoginWithScopes:scopes handler:^(BOOL isCancel, NSError * _Nullable error, TapTapAccount * _Nullable account) {
 			Dictionary ret;
 			ret["type"] = "login";
 			
-			if (success && account) {
-				ret["result"] = "success";
-				Godot3TapTap::get_singleton()->_post_event(ret);
+			if (isCancel){
+				Godot3TapTap::get_singleton()->emit_signal("onLoginCancel");
+			} else if (error != nil) {
+				String message = String::utf8([[error localizedDescription] UTF8String]);
+				Godot3TapTap::get_singleton()->emit_signal("onLoginFail", message);
+			} else {
 				Godot3TapTap::get_singleton()->emit_signal("onLoginSuccess");
-			} else if (error) {
-				if (error.code == 1) {
-					ret["result"] = "cancel";
-					Godot3TapTap::get_singleton()->_post_event(ret);
-					Godot3TapTap::get_singleton()->emit_signal("onLoginCancel");
-				} else {
-					ret["result"] = "error";
-					ret["message"] = String::utf8([[error localizedDescription] UTF8String]);
-					Godot3TapTap::get_singleton()->_post_event(ret);
-					Godot3TapTap::get_singleton()->emit_signal("onLoginFail", ret["message"]);
-				}
 			}
 		}];
-	});
+	// });
 }
 
 - (BOOL)isLoggedIn {
@@ -205,21 +193,12 @@ typedef PoolStringArray GodotStringArray;
 - (void)logout {
 	[TapTapLogin logout];
 	[TapTapCompliance exit];
-	
-	Dictionary ret;
-	ret["type"] = "logout";
-	ret["result"] = "ok";
-	Godot3TapTap::get_singleton()->_post_event(ret);
 }
 
 - (void)startComplianceWithUserId:(NSString *)userId {
 	dispatch_async(dispatch_get_main_queue(), ^{
 		if (!userId || userId.length == 0) {
-			Dictionary ret;
-			ret["type"] = "compliance";
-			ret["code"] = -1;
-			ret["info"] = "Invalid user ID";
-			Godot3TapTap::get_singleton()->_post_event(ret);
+			Godot3TapTap::get_singleton()->emit_signal("onComplianceResult", -1, "Invalid user ID");
 			return;
 		}
 		
@@ -228,12 +207,8 @@ typedef PoolStringArray GodotStringArray;
 }
 
 - (void)complianceCallbackWithCode:(TapComplianceResultHandlerCode)code extra:(NSString * _Nullable)extra {
-	Dictionary ret;
-	ret["type"] = "compliance";
-	ret["code"] = (int)code;
-	ret["info"] = String::utf8([extra UTF8String] ?: "");
-	Godot3TapTap::get_singleton()->_post_event(ret);
-	Godot3TapTap::get_singleton()->emit_signal("onComplianceResult", (int)code, ret["info"]);
+	String info = String::utf8([extra UTF8String] ?: "");
+	Godot3TapTap::get_singleton()->emit_signal("onComplianceResult", (int)code, info);
 }
 
 @end
@@ -275,10 +250,6 @@ void Godot3TapTap::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("showTip"), &Godot3TapTap::showTip);
 	ClassDB::bind_method(D_METHOD("restartApp"), &Godot3TapTap::restartApp);
 	
-	// 事件队列
-	ClassDB::bind_method(D_METHOD("get_pending_event_count"), &Godot3TapTap::get_pending_event_count);
-	ClassDB::bind_method(D_METHOD("pop_pending_event"), &Godot3TapTap::pop_pending_event);
-	
 	// 信号（与 Android 版本完全一致）
 	ADD_SIGNAL(MethodInfo("onLoginSuccess"));
 	ADD_SIGNAL(MethodInfo("onLoginFail", PropertyInfo(Variant::STRING, "message")));
@@ -293,10 +264,6 @@ void Godot3TapTap::_bind_methods() {
 	ADD_SIGNAL(MethodInfo("onFinishPurchaseResponse", PropertyInfo(Variant::STRING, "jsonString")));
 	ADD_SIGNAL(MethodInfo("onQueryUnfinishedPurchaseResponse", PropertyInfo(Variant::STRING, "jsonString")));
 	ADD_SIGNAL(MethodInfo("onLaunchBillingFlowResult", PropertyInfo(Variant::STRING, "jsonString")));
-}
-
-void Godot3TapTap::_post_event(Variant p_event) {
-	pending_events.push_back(p_event);
 }
 
 // SDK 初始化
@@ -347,11 +314,7 @@ void Godot3TapTap::logoutThenRestart() {
 // 合规认证
 void Godot3TapTap::compliance() {
 	if (![taptap_delegate isLoggedIn]) {
-		Dictionary ret;
-		ret["type"] = "compliance";
-		ret["code"] = -1;
-		ret["info"] = "Not logged in";
-		_post_event(ret);
+		emit_signal("onComplianceResult", -1, "Not logged in");
 		return;
 	}
 	
@@ -413,20 +376,6 @@ void Godot3TapTap::showTip(const String &p_text) {
 
 void Godot3TapTap::restartApp() {
 	exit(0);
-}
-
-int Godot3TapTap::get_pending_event_count() {
-	return pending_events.size();
-}
-
-Variant Godot3TapTap::pop_pending_event() {
-	if (pending_events.size() == 0) {
-		return Variant();
-	}
-	
-	Variant front = pending_events.front()->get();
-	pending_events.pop_front();
-	return front;
 }
 
 Godot3TapTap *Godot3TapTap::get_singleton() {

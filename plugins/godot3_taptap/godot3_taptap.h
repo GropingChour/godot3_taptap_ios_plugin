@@ -46,8 +46,6 @@ class Godot3TapTap : public Object {
 	static Godot3TapTap *instance;
 	static void _bind_methods();
 
-	List<Variant> pending_events;
-
 	String client_id;
 	String client_token;
 	bool sdk_initialized;
@@ -55,7 +53,6 @@ class Godot3TapTap : public Object {
 	void add_pending_event(const String &type, const String &result, const Dictionary &data = Dictionary());
 
 public:
-	void _post_event(Variant p_event);
 
 	// SDK Initialization
 	void initSdk(const String &p_client_id, const String &p_client_token, bool p_enable_log, bool p_with_iap);
@@ -87,10 +84,6 @@ public:
 	// Utility
 	void showTip(const String &p_text);
 	void restartApp();
-
-	// Event handling
-	int get_pending_event_count();
-	Variant pop_pending_event();
 
 	static Godot3TapTap *get_singleton();
 
