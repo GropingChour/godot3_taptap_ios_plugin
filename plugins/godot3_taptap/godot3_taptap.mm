@@ -86,13 +86,6 @@ typedef PoolStringArray GodotStringArray;
 - (void)initSDKWithClientId:(NSString *)clientId clientToken:(NSString *)clientToken enableLog:(BOOL)enableLog {
 	// dispatch_async(dispatch_get_main_queue(), ^{
 
-		// Method 1: Direct property (if exists)
-		if ([options respondsToSelector:@selector(setEnableAutoReport:)]) {
-			[options setValue:@NO forKey:@"enableAutoReport"];
-			NSLog(@"[TapTap ObjC] ✓ Disabled auto report via property");
-		} else {
-			NSLog(@"[TapTap ObjC] ✗ enableAutoReport property not available");
-		}
 
 		NSLog(@"[TapTap] SDK init with clientId: %@, clientToken: %@", clientId, clientToken);
 		self.clientId = clientId;
@@ -104,6 +97,13 @@ typedef PoolStringArray GodotStringArray;
 		options.region = TapTapRegionTypeCN;
 		options.enableLog = enableLog;
 		
+		// Method 1: Direct property (if exists)
+		if ([options respondsToSelector:@selector(setEnableAutoReport:)]) {
+			[options setValue:@NO forKey:@"enableAutoReport"];
+			NSLog(@"[TapTap ObjC] ✓ Disabled auto report via property");
+		} else {
+			NSLog(@"[TapTap ObjC] ✗ enableAutoReport property not available");
+		}
 
 		[TapTapSDK initWithOptions:options];
 		self.sdkInitialized = YES;
