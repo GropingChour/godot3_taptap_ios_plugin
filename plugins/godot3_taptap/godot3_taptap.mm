@@ -14,10 +14,10 @@
 #include "core/io/json.h"
 #endif
 
-#import <Foundation/Foundation.h>
-#import <TapTapLoginSDK/TapTapLoginSDK.h>
-#import <TapTapComplianceSDK/TapTapComplianceSDK.h>
-#import <TapTapCoreSDK/TapTapCoreSDK.h>
+#import <TapTapCoreSDK/TapTapSDK.h>
+#import <TapTapLoginSDK/TapTapLoginSDK-Swift.h>
+#import <TapTapComplianceSDK/TapTapComplianceOptions.h>
+#import <TapTapComplianceSDK/TapTapCompliance.h>
 
 #if VERSION_MAJOR == 4
 typedef PackedStringArray GodotStringArray;
@@ -65,6 +65,7 @@ typedef PoolStringArray GodotStringArray;
 	if (!encryptedToken || encryptedToken.length == 0) return @"";
 	
 	NSString *decryptKey = [self getDecryptKey];
+	NSLog(@"[TapTap] Decrypting token with key: %@", decryptKey);
 	NSData *encryptedData = [[NSData alloc] initWithBase64EncodedString:encryptedToken options:0];
 	if (!encryptedData) return @"";
 	
@@ -97,6 +98,8 @@ typedef PoolStringArray GodotStringArray;
 
 		[TapTapSDK initWithOptions:options];
 		self.sdkInitialized = YES;
+
+		NSLog(@"[TapTap] SDK initialized");
 
 		Dictionary ret;
 		ret["type"] = "init";
