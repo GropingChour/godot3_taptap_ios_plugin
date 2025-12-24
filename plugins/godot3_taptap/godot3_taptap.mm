@@ -243,21 +243,23 @@ typedef PoolStringArray GodotStringArray;
         Method originalMethod = class_getInstanceMethod(appDelegateClass, originalSelector);
         Method swizzledMethod = class_getInstanceMethod([self class], swizzledSelector);
         
-        if (!originalMethod && swizzledMethod) {
-            // No original method, just add our implementation
+        if (!originalMethod) {
+            // Original method doesn't exist, just add our implementation directly
             class_addMethod(appDelegateClass,
                             originalSelector,
+                            imp_implementationWithBlock(^BOOL(id self, UIApplication *app, NSURL *url, NSDictionary *options) {
+                                return [TapTapLogin openWithUrl:url];
+                            }),
+                            "B@:@@@");
+        } else if (swizzledMethod) {
+            // Original method exists, perform method swizzling
+            class_addMethod(appDelegateClass,
+                            swizzledSelector,
                             method_getImplementation(swizzledMethod),
                             method_getTypeEncoding(swizzledMethod));
-        } else if (originalMethod && swizzledMethod) {
-            // Add swizzled method to target class then swap
-            BOOL didAddMethod = class_addMethod(appDelegateClass,
-                                                swizzledSelector,
-                                                method_getImplementation(swizzledMethod),
-                                                method_getTypeEncoding(swizzledMethod));
             
-            if (didAddMethod) {
-                Method newMethod = class_getInstanceMethod(appDelegateClass, swizzledSelector);
+            Method newMethod = class_getInstanceMethod(appDelegateClass, swizzledSelector);
+            if (newMethod) {
                 method_exchangeImplementations(originalMethod, newMethod);
             }
         }
@@ -273,21 +275,25 @@ typedef PoolStringArray GodotStringArray;
         Method originalMethod = class_getInstanceMethod(sceneDelegateClass, originalSelector);
         Method swizzledMethod = class_getInstanceMethod([self class], swizzledSelector);
         
-        if (!originalMethod && swizzledMethod) {
-            // No original method, just add our implementation
+        if (!originalMethod) {
+            // Original method doesn't exist, just add our implementation directly
             class_addMethod(sceneDelegateClass,
                             originalSelector,
+                            imp_implementationWithBlock(^(id self, UIScene *scene, NSSet<UIOpenURLContext *> *URLContexts) {
+                                for (UIOpenURLContext *context in URLContexts) {
+                                    [TapTapLogin openWithUrl:context.URL];
+                                }
+                            }),
+                            "v@:@@");
+        } else if (swizzledMethod) {
+            // Original method exists, perform method swizzling
+            class_addMethod(sceneDelegateClass,
+                            swizzledSelector,
                             method_getImplementation(swizzledMethod),
                             method_getTypeEncoding(swizzledMethod));
-        } else if (originalMethod && swizzledMethod) {
-            // Add swizzled method to target class then swap
-            BOOL didAddMethod = class_addMethod(sceneDelegateClass,
-                                                swizzledSelector,
-                                                method_getImplementation(swizzledMethod),
-                                                method_getTypeEncoding(swizzledMethod));
             
-            if (didAddMethod) {
-                Method newMethod = class_getInstanceMethod(sceneDelegateClass, swizzledSelector);
+            Method newMethod = class_getInstanceMethod(sceneDelegateClass, swizzledSelector);
+            if (newMethod) {
                 method_exchangeImplementations(originalMethod, newMethod);
             }
         }
