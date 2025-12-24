@@ -295,12 +295,11 @@ typedef PoolStringArray GodotStringArray;
         return YES;
     }
     
+    // Call original implementation
     SEL selector = @selector(taptap_application:openURL:options:);
-    if ([self respondsToSelector:selector]) {
-        BOOL (*func)(id, SEL, UIApplication *, NSURL *, NSDictionary *) = (void *)class_getMethodImplementation([self class], selector);
-        return func(self, selector, app, url, options);
-    }
-    return NO;
+    IMP imp = class_getMethodImplementation([self class], selector);
+    BOOL (*func)(id, SEL, UIApplication *, NSURL *, NSDictionary *) = (BOOL (*)(id, SEL, UIApplication *, NSURL *, NSDictionary *))imp;
+    return func(self, selector, app, url, options);
 }
 
 - (void)taptap_scene:(UIScene *)scene openURLContexts:(NSSet<UIOpenURLContext *> *)URLContexts API_AVAILABLE(ios(13.0)) {
@@ -308,11 +307,11 @@ typedef PoolStringArray GodotStringArray;
         [TapTapLogin openWithUrl:context.URL];
     }
     
+    // Call original implementation
     SEL selector = @selector(taptap_scene:openURLContexts:);
-    if ([self respondsToSelector:selector]) {
-        void (*func)(id, SEL, UIScene *, NSSet *) = (void *)class_getMethodImplementation([self class], selector);
-        func(self, selector, scene, URLContexts);
-    }
+    IMP imp = class_getMethodImplementation([self class], selector);
+    void (*func)(id, SEL, UIScene *, NSSet *) = (void (*)(id, SEL, UIScene *, NSSet *))imp;
+    func(self, selector, scene, URLContexts);
 }
 
 @end
