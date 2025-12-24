@@ -472,15 +472,58 @@ void Godot3TapTap::queryUnfinishedPurchaseAsync() {
 
 // 工具方法
 void Godot3TapTap::showTip(const String &p_text) {
-	dispatch_async(dispatch_get_main_queue(), ^{
-		UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"提示"
-																	   message:[[NSString alloc] initWithUTF8String:p_text.utf8().get_data()]
-																preferredStyle:UIAlertControllerStyleAlert];
-		[alert addAction:[UIAlertAction actionWithTitle:@"确定" style:UIAlertActionStyleDefault handler:nil]];
-		
-		UIViewController *rootVC = [UIApplication sharedApplication].keyWindow.rootViewController;
-		[rootVC presentViewController:alert animated:YES completion:nil];
-	});
+dispatch_async(dispatch_get_main_queue(), ^{
+NSString *message = [[NSString alloc] initWithUTF8String:p_text.utf8().get_data()];
+
+// 创建 Toast 视图
+UIView *toastView = [[UIView alloc] init];
+toastView.backgroundColor = [[UIColor blackColor] colorWithAlphaComponent:0.8];
+toastView.layer.cornerRadius = 10.0;
+toastView.clipsToBounds = YES;
+
+// 创建标签
+UILabel *label = [[UILabel alloc] init];
+label.text = message;
+label.textColor = [UIColor whiteColor];
+label.textAlignment = NSTextAlignmentCenter;
+label.font = [UIFont systemFontOfSize:14.0];
+label.numberOfLines = 0;
+[toastView addSubview:label];
+
+// 计算尺寸
+CGSize screenSize = [UIScreen mainScreen].bounds.size;
+CGFloat maxWidth = screenSize.width * 0.8;
+CGSize textSize = [message boundingRectWithSize:CGSizeMake(maxWidth, CGFLOAT_MAX)
+                                        options:NSStringDrawingUsesLineFragmentOrigin
+                                     attributes:@{NSFontAttributeName: label.font}
+                                        context:nil].size;
+
+CGFloat padding = 20.0;
+toastView.frame = CGRectMake((screenSize.width - textSize.width - padding * 2) / 2,
+                            screenSize.height - 150,
+                            textSize.width + padding * 2,
+                            textSize.height + padding * 2);
+label.frame = CGRectMake(padding, padding, textSize.width, textSize.height);
+
+// 添加到窗口
+UIWindow *keyWindow = [UIApplication sharedApplication].keyWindow;
+[keyWindow addSubview:toastView];
+
+// 动画显示
+toastView.alpha = 0.0;
+[UIView animateWithDuration:0.3 animations:^{
+    toastView.alpha = 1.0;
+} completion:^(BOOL finished) {
+    // 延迟消失
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        [UIView animateWithDuration:0.3 animations:^{
+            toastView.alpha = 0.0;
+        } completion:^(BOOL finished) {
+            [toastView removeFromSuperview];
+        }];
+    });
+}];
+});
 }
 
 void Godot3TapTap::restartApp() {
