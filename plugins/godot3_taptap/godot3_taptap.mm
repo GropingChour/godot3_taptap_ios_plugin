@@ -243,7 +243,14 @@ typedef PoolStringArray GodotStringArray;
         Method originalMethod = class_getInstanceMethod(appDelegateClass, originalSelector);
         Method swizzledMethod = class_getInstanceMethod([self class], swizzledSelector);
         
-        if (originalMethod) {
+        if (!originalMethod && swizzledMethod) {
+            // No original method, just add our implementation
+            class_addMethod(appDelegateClass,
+                            originalSelector,
+                            method_getImplementation(swizzledMethod),
+                            method_getTypeEncoding(swizzledMethod));
+        } else if (originalMethod && swizzledMethod) {
+            // Add swizzled method to target class then swap
             BOOL didAddMethod = class_addMethod(appDelegateClass,
                                                 swizzledSelector,
                                                 method_getImplementation(swizzledMethod),
@@ -253,11 +260,6 @@ typedef PoolStringArray GodotStringArray;
                 Method newMethod = class_getInstanceMethod(appDelegateClass, swizzledSelector);
                 method_exchangeImplementations(originalMethod, newMethod);
             }
-        } else {
-            class_addMethod(appDelegateClass,
-                            originalSelector,
-                            method_getImplementation(swizzledMethod),
-                            method_getTypeEncoding(swizzledMethod));
         }
     }
 }
@@ -271,7 +273,14 @@ typedef PoolStringArray GodotStringArray;
         Method originalMethod = class_getInstanceMethod(sceneDelegateClass, originalSelector);
         Method swizzledMethod = class_getInstanceMethod([self class], swizzledSelector);
         
-        if (originalMethod) {
+        if (!originalMethod && swizzledMethod) {
+            // No original method, just add our implementation
+            class_addMethod(sceneDelegateClass,
+                            originalSelector,
+                            method_getImplementation(swizzledMethod),
+                            method_getTypeEncoding(swizzledMethod));
+        } else if (originalMethod && swizzledMethod) {
+            // Add swizzled method to target class then swap
             BOOL didAddMethod = class_addMethod(sceneDelegateClass,
                                                 swizzledSelector,
                                                 method_getImplementation(swizzledMethod),
@@ -281,37 +290,28 @@ typedef PoolStringArray GodotStringArray;
                 Method newMethod = class_getInstanceMethod(sceneDelegateClass, swizzledSelector);
                 method_exchangeImplementations(originalMethod, newMethod);
             }
-        } else {
-            class_addMethod(sceneDelegateClass,
-                            originalSelector,
-                            method_getImplementation(swizzledMethod),
-                            method_getTypeEncoding(swizzledMethod));
         }
     }
 }
 
 - (BOOL)taptap_application:(UIApplication *)app openURL:(NSURL *)url options:(NSDictionary<UIApplicationOpenURLOptionsKey,id> *)options {
+    // Handle TapTap login callback
     if ([TapTapLogin openWithUrl:url]) {
         return YES;
     }
     
-    // Call original implementation
-    SEL selector = @selector(taptap_application:openURL:options:);
-    IMP imp = class_getMethodImplementation([self class], selector);
-    BOOL (*func)(id, SEL, UIApplication *, NSURL *, NSDictionary *) = (BOOL (*)(id, SEL, UIApplication *, NSURL *, NSDictionary *))imp;
-    return func(self, selector, app, url, options);
+    // Call original implementation (which is now swizzled to taptap_application:openURL:options:)
+    return [self taptap_application:app openURL:url options:options];
 }
 
 - (void)taptap_scene:(UIScene *)scene openURLContexts:(NSSet<UIOpenURLContext *> *)URLContexts API_AVAILABLE(ios(13.0)) {
+    // Handle TapTap login callback
     for (UIOpenURLContext *context in URLContexts) {
         [TapTapLogin openWithUrl:context.URL];
     }
     
-    // Call original implementation
-    SEL selector = @selector(taptap_scene:openURLContexts:);
-    IMP imp = class_getMethodImplementation([self class], selector);
-    void (*func)(id, SEL, UIScene *, NSSet *) = (void (*)(id, SEL, UIScene *, NSSet *))imp;
-    func(self, selector, scene, URLContexts);
+    // Call original implementation (which is now swizzled to taptap_scene:openURLContexts:)
+    [self taptap_scene:scene openURLContexts:URLContexts];
 }
 
 @end
