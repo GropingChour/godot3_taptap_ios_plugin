@@ -78,7 +78,7 @@
 ```ini
 [plist]
 CFBundleURLTypes = [{
-    "CFBundleURLSchemes": ["open-taptap-wpyjvbc5f2jnqqlgfr"]
+    "CFBundleURLSchemes": ["ttwpyjvbc5f2jnqqlgfr"]
 }]
 LSApplicationQueriesSchemes = ["tapiosdk", "tapsdk", "taptap"]
 ```

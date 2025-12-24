@@ -18,6 +18,8 @@
 #import <TapTapLoginSDK/TapTapLoginSDK-Swift.h>
 #import <TapTapComplianceSDK/TapTapComplianceOptions.h>
 #import <TapTapComplianceSDK/TapTapCompliance.h>
+#import <objc/runtime.h>
+#import <objc/message.h>
 
 #if VERSION_MAJOR == 4
 typedef PackedStringArray GodotStringArray;
@@ -207,6 +209,110 @@ typedef PoolStringArray GodotStringArray;
 - (void)complianceCallbackWithCode:(TapComplianceResultHandlerCode)code extra:(NSString * _Nullable)extra {
 	String info = String::utf8([extra UTF8String] ?: "");
 	Godot3TapTap::get_singleton()->emit_signal("onComplianceResult", (int)code, info);
+}
+
+@end
+
+// MARK: - TapTap Injector for OpenURL
+
+@interface TapTapInjector : NSObject
+@end
+
+@implementation TapTapInjector
+
++ (void)load {
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        [self injectAppDelegate];
+        if (@available(iOS 13.0, *)) {
+            [self injectSceneDelegate];
+        }
+    });
+}
+
++ (void)injectAppDelegate {
+    Class appDelegateClass = NSClassFromString(@"AppDelegate");
+    if (!appDelegateClass) {
+        appDelegateClass = NSClassFromString(@"GodotApplicalitionDelegate");
+    }
+    
+    if (appDelegateClass) {
+        SEL originalSelector = @selector(application:openURL:options:);
+        SEL swizzledSelector = @selector(taptap_application:openURL:options:);
+        
+        Method originalMethod = class_getInstanceMethod(appDelegateClass, originalSelector);
+        Method swizzledMethod = class_getInstanceMethod([self class], swizzledSelector);
+        
+        if (originalMethod) {
+            BOOL didAddMethod = class_addMethod(appDelegateClass,
+                                                swizzledSelector,
+                                                method_getImplementation(swizzledMethod),
+                                                method_getTypeEncoding(swizzledMethod));
+            
+            if (didAddMethod) {
+                Method newMethod = class_getInstanceMethod(appDelegateClass, swizzledSelector);
+                method_exchangeImplementations(originalMethod, newMethod);
+            }
+        } else {
+            class_addMethod(appDelegateClass,
+                            originalSelector,
+                            method_getImplementation(swizzledMethod),
+                            method_getTypeEncoding(swizzledMethod));
+        }
+    }
+}
+
++ (void)injectSceneDelegate {
+    Class sceneDelegateClass = NSClassFromString(@"SceneDelegate");
+    if (sceneDelegateClass) {
+        SEL originalSelector = @selector(scene:openURLContexts:);
+        SEL swizzledSelector = @selector(taptap_scene:openURLContexts:);
+        
+        Method originalMethod = class_getInstanceMethod(sceneDelegateClass, originalSelector);
+        Method swizzledMethod = class_getInstanceMethod([self class], swizzledSelector);
+        
+        if (originalMethod) {
+            BOOL didAddMethod = class_addMethod(sceneDelegateClass,
+                                                swizzledSelector,
+                                                method_getImplementation(swizzledMethod),
+                                                method_getTypeEncoding(swizzledMethod));
+            
+            if (didAddMethod) {
+                Method newMethod = class_getInstanceMethod(sceneDelegateClass, swizzledSelector);
+                method_exchangeImplementations(originalMethod, newMethod);
+            }
+        } else {
+            class_addMethod(sceneDelegateClass,
+                            originalSelector,
+                            method_getImplementation(swizzledMethod),
+                            method_getTypeEncoding(swizzledMethod));
+        }
+    }
+}
+
+- (BOOL)taptap_application:(UIApplication *)app openURL:(NSURL *)url options:(NSDictionary<UIApplicationOpenURLOptionsKey,id> *)options {
+    if ([TapTapLogin openWithUrl:url]) {
+        return YES;
+    }
+    
+    SEL selector = @selector(taptap_application:openURL:options:);
+    if ([self respondsToSelector:selector]) {
+        BOOL (*func)(id, SEL, UIApplication *, NSURL *, NSDictionary *) = (void *)class_getMethodImplementation([self class], selector);
+        return func(self, selector, app, url, options);
+    }
+    return NO;
+}
+
+- (void)taptap_scene:(UIScene *)scene openURLContexts:(NSSet<UIOpenURLContext *> *)URLContexts API_AVAILABLE(ios(13.0)) {
+    for (UIOpenURLContext *context in URLContexts) {
+        [TapTapLogin openWithUrl:context.URL];
+    }
+    
+    SEL selector = @selector(taptap_scene:openURLContexts:);
+    if ([self respondsToSelector:selector]) {
+        void (*func)(id, SEL, UIScene *, NSSet *) = (void *)class_getMethodImplementation([self class], selector);
+        func(self, selector, scene, URLContexts);
+    }
 }
 
 @end
