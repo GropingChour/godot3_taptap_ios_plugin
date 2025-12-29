@@ -69,7 +69,7 @@ typedef PoolStringArray GodotStringArray;
 	if (!encryptedToken || encryptedToken.length == 0) return @"";
 
 	NSString *decryptKey = [self getDecryptKey];
-	NSLog(@"[TapTap] Decrypting token with key: %@", decryptKey);
+	// NSLog(@"[TapTap] Decrypting token with key: %@", decryptKey);
 	NSData *encryptedData = [[NSData alloc] initWithBase64EncodedString:encryptedToken options:0];
 	if (!encryptedData) return @"";
 
@@ -90,7 +90,7 @@ typedef PoolStringArray GodotStringArray;
 - (void)initSDKWithClientId:(NSString *)clientId clientToken:(NSString *)clientToken enableLog:(BOOL)enableLog {
 	// dispatch_async(dispatch_get_main_queue(), ^{
 
-	NSLog(@"[TapTap] SDK init with clientId: %@, clientToken: %@", clientId, clientToken);
+	// NSLog(@"[TapTap] SDK init with clientId: %@, clientToken: %@", clientId, clientToken);
 	self.clientId = clientId;
 	self.clientToken = clientToken;
 
