@@ -6,8 +6,7 @@ initialization="register_godot3_taptap_types"
 deinitialization="unregister_godot3_taptap_types"
 
 [dependencies]
-linked=[]
-embedded=[
+linked=[
     "sdk/THEMISLite.xcframework",
     "sdk/TapTapBasicToolsSDK.xcframework",
     "sdk/TapTapCoreSDK.xcframework",
@@ -20,6 +19,7 @@ embedded=[
     "sdk/TapTapComplianceSDK.xcframework",
     "sdk/TapTapComplianceResource.bundle"
 ]
+embedded=[]
 system=["libz.1.tbd", "libc++.tbd"]
 
 linker_flags=["-ObjC"]
