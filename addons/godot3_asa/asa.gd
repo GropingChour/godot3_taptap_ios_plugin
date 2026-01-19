@@ -151,7 +151,7 @@ func report_activation(app_name: String = "") -> void:
 	    app_name: 应用名称（可选，默认从 ProjectSettings 获取）
 	"""
 	if not is_attributed:
-		push_error("[ASA] Cannot report activation: attribution data not available")
+		print("[ASA] ERROR: Cannot report activation: attribution data not available")
 		return
 	
 	if not attribution_data.get("attribution", false):
@@ -159,12 +159,15 @@ func report_activation(app_name: String = "") -> void:
 		return
 	
 	if appsa_from_key.empty():
-		push_error("[ASA] AppSA from_key not set, call set_appsa_from_key() first")
+		print("[ASA] ERROR: AppSA from_key not set, call set_appsa_from_key() first")
 		return
 	
 	var device_info = _get_device_info()
 	if app_name.empty():
-		app_name = ProjectSettings.get_setting("application/config/name", "")
+		if ProjectSettings.has_setting("application/config/name"):
+			app_name = ProjectSettings.get_setting("application/config/name")
+		else:
+			app_name = ""
 	
 	var data = {
 		"install_time": str(OS.get_unix_time() * 1000),  # 毫秒时间戳
@@ -304,7 +307,7 @@ func _report_event(event_name: String, event_values: Dictionary, is_instant: boo
 	else:
 		# 汇总上报：传 event_date
 		if event_date.empty():
-			push_error("[ASA] event_date is required for summary report")
+			print("[ASA] ERROR: event_date is required for summary report")
 			return
 		data["event_date"] = event_date
 	
@@ -333,8 +336,9 @@ func _send_appsa_request(url: String, data: Dictionary, request_type: String) ->
 	
 	var err = http_request.request(full_url, headers, true, HTTPClient.METHOD_POST, body)
 	if err != OK:
-		push_error("[ASA] HTTP request failed: ", err)
-		emit_signal("onAppSAReportFailed", "HTTP request error: %d" % err)
+		var error_msg = "[ASA] HTTP request failed: %d" % err
+		print("[ASA] ERROR: ", error_msg)
+		emit_signal("onAppSAReportFailed", error_msg)
 
 func _on_http_request_completed(result: int, response_code: int, headers: PoolStringArray, body: PoolByteArray) -> void:
 	"""HTTP 请求完成回调"""
@@ -342,7 +346,7 @@ func _on_http_request_completed(result: int, response_code: int, headers: PoolSt
 	
 	if result != HTTPRequest.RESULT_SUCCESS:
 		var error_msg = "[ASA] AppSA request failed (%s): result=%d" % [request_type, result]
-		push_error(error_msg)
+		print("[ASA] ERROR: ", error_msg)
 		emit_signal("onAppSAReportFailed", error_msg)
 		return
 	
@@ -351,7 +355,7 @@ func _on_http_request_completed(result: int, response_code: int, headers: PoolSt
 	
 	if response_code != 200:
 		var error_msg = "[ASA] AppSA returned error code: %d" % response_code
-		push_error(error_msg)
+		print("[ASA] ERROR: ", error_msg)
 		emit_signal("onAppSAReportFailed", error_msg)
 		return
 	
@@ -359,7 +363,7 @@ func _on_http_request_completed(result: int, response_code: int, headers: PoolSt
 	var json = JSON.parse(response_text)
 	if json.error != OK:
 		var error_msg = "[ASA] Failed to parse AppSA response"
-		push_error(error_msg)
+		print("[ASA] ERROR: ", error_msg)
 		emit_signal("onAppSAReportFailed", error_msg)
 		return
 	
@@ -369,7 +373,7 @@ func _on_http_request_completed(result: int, response_code: int, headers: PoolSt
 		emit_signal("onAppSAReportSuccess", response)
 	else:
 		var error_msg = "[ASA] AppSA returned error: code=%s, msg=%s" % [response.get("code", ""), response.get("msg", "")]
-		push_error(error_msg)
+		print("[ASA] ERROR: ", error_msg)
 		emit_signal("onAppSAReportFailed", error_msg)
 
 func _on_attribution_received(data: String, code: int, message: String) -> void:
@@ -385,7 +389,7 @@ func _on_attribution_received(data: String, code: int, message: String) -> void:
 			print("[ASA] Attribution: ", attribution_data.get("attribution", false))
 			print("[ASA] Campaign ID: ", attribution_data.get("campaignId", ""))
 		else:
-			push_error("[ASA] Failed to parse attribution data")
+			print("[ASA] ERROR: Failed to parse attribution data")
 	
 	emit_signal("onASAAttributionReceived", data, code, message)
 
@@ -440,7 +444,7 @@ func save_attribution_data(file_path: String = "user://asa_attribution.json") ->
 	var file = File.new()
 	var err = file.open(file_path, File.WRITE)
 	if err != OK:
-		push_error("[ASA] Failed to open file for writing: ", file_path)
+		print("[ASA] ERROR: Failed to open file for writing: ", file_path)
 		return false
 	
 	file.store_string(to_json(attribution_data))
@@ -464,7 +468,7 @@ func load_attribution_data(file_path: String = "user://asa_attribution.json") ->
 	
 	var err = file.open(file_path, File.READ)
 	if err != OK:
-		push_error("[ASA] Failed to open file for reading: ", file_path)
+		print("[ASA] ERROR: Failed to open file for reading: ", file_path)
 		return false
 	
 	var json_text = file.get_as_text()
@@ -472,7 +476,7 @@ func load_attribution_data(file_path: String = "user://asa_attribution.json") ->
 	
 	var json = JSON.parse(json_text)
 	if json.error != OK:
-		push_error("[ASA] Failed to parse saved attribution data")
+		print("[ASA] ERROR: Failed to parse saved attribution data")
 		return false
 	
 	attribution_data = json.result

@@ -175,7 +175,7 @@ func report_daily_retention_summary(day: int, amount: int):
 		7:
 			ASA.report_retention_day7_summary(amount, date)
 		_:
-			push_error("Invalid retention day: ", day)
+			print("[ASA Example] ERROR: Invalid retention day: ", day)
 
 # ============================================================================
 # AppSA 上报回调
