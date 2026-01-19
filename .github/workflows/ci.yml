@@ -92,14 +92,17 @@ jobs:
           lipo -create \
             bin/libgodot3_asa.arm64-simulator.release_debug.a \
             bin/libgodot3_asa.x86_64-simulator.release_debug.a \
-            -output bin/simulator/libgodot3_asa.simulator.release_debug.a
+            -output bin/simulator/libgodot3_asa.a
+          
+          # Rename device binary for XCFramework (must be .a without suffix)
+          cp bin/libgodot3_asa.arm64-ios.release_debug.a bin/libgodot3_asa.device.a
           
           # Create XCFrameworks
           mkdir -p bin/release/godot3_asa
           
           xcodebuild -create-xcframework \
-            -library bin/libgodot3_asa.arm64-ios.release_debug.a \
-            -library bin/simulator/libgodot3_asa.simulator.release_debug.a \
+            -library bin/libgodot3_asa.device.a \
+            -library bin/simulator/libgodot3_asa.a \
             -output bin/release/godot3_asa/godot3_asa.release.xcframework
           
           # Copy as .debug.xcframework
