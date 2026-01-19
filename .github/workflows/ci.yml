@@ -97,8 +97,7 @@ jobs:
           echo "Checking simulator fat binary:"
           lipo -info bin/simulator/libgodot3_asa.a
           
-          # Rename device binary for XCFramework
-          cp bin/libgodot3_asa.arm64-ios.release_debug.a bin/device/libgodot3_asa.a
+          # Move device binary for XCFramework
           mkdir -p bin/device
           mv bin/libgodot3_asa.arm64-ios.release_debug.a bin/device/libgodot3_asa.a
           
