@@ -114,35 +114,18 @@ jobs:
         run: |
           echo "Reorganizing directory structure for distribution..."
           
-          # Create final distribution structure for TapTap
-          mkdir -p bin/dist/godot3_taptap/ios/plugins/godot3_taptap
-          mkdir -p bin/dist/godot3_taptap/addons
-          
-          # Copy TapTap XCFrameworks and .gdip to ios/plugins
-          cp -r bin/release/godot3_taptap/*.xcframework bin/dist/godot3_taptap/ios/plugins/godot3_taptap/
-          cp bin/release/godot3_taptap/godot3_taptap.gdip bin/dist/godot3_taptap/ios/plugins/godot3_taptap/
-          
-          # Copy TapTap SDK frameworks to plugin directory (embedded dependencies)
-          cp -r plugins/godot3_taptap/sdk bin/dist/godot3_taptap/ios/plugins/godot3_taptap/
-          
-          # Copy TapTap addons directory
-          cp -r addons/godot3_taptap bin/dist/godot3_taptap/addons/godot3_taptap
-          
+          # Temporary: Only package ASA plugin (since we're only building ASA)
           # Create final distribution structure for ASA
           mkdir -p bin/dist/godot3_asa/ios/plugins/godot3_asa
           mkdir -p bin/dist/godot3_asa/addons
           
           # Copy ASA XCFrameworks and .gdip to ios/plugins
-          if [ -d "bin/release/godot3_asa" ]; then
-            cp -r bin/release/godot3_asa/*.xcframework bin/dist/godot3_asa/ios/plugins/godot3_asa/
-            cp bin/release/godot3_asa/godot3_asa.gdip bin/dist/godot3_asa/ios/plugins/godot3_asa/
-            
-            # Copy ASA addons directory
-            cp -r addons/godot3_asa bin/dist/godot3_asa/addons/godot3_asa
-            echo "ASA plugin packaged successfully"
-          else
-            echo "ASA plugin not found, skipping"
-          fi
+          cp -r bin/release/godot3_asa/*.xcframework bin/dist/godot3_asa/ios/plugins/godot3_asa/
+          cp bin/release/godot3_asa/godot3_asa.gdip bin/dist/godot3_asa/ios/plugins/godot3_asa/
+          
+          # Copy ASA addons directory
+          cp -r addons/godot3_asa bin/dist/godot3_asa/addons/godot3_asa
+          echo "ASA plugin packaged successfully"
           
           echo "Distribution structure created successfully"
 
@@ -154,20 +137,8 @@ jobs:
           echo "Files in distribution:"
           find bin/dist -type f
           echo ""
-          echo "TapTap Plugin:"
-          ls -lh bin/dist/godot3_taptap/ios/plugins/godot3_taptap/*.xcframework 2>/dev/null || echo "Not found"
-          echo ""
           echo "ASA Plugin:"
           ls -lh bin/dist/godot3_asa/ios/plugins/godot3_asa/*.xcframework 2>/dev/null || echo "Not found"
-
-      - name: Upload TapTap plugin artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: godot3_taptap-ios-plugin-${{ github.sha }}
-          path: bin/dist/godot3_taptap/
-          retention-days: 14
-          if-no-files-found: error
-          compression-level: 6
 
       - name: Upload ASA plugin artifacts
         uses: actions/upload-artifact@v4
@@ -175,7 +146,7 @@ jobs:
           name: godot3_asa-ios-plugin-${{ github.sha }}
           path: bin/dist/godot3_asa/
           retention-days: 14
-          if-no-files-found: warn
+          if-no-files-found: error
           compression-level: 6
 
       - name: Create build summary
@@ -185,12 +156,7 @@ jobs:
           echo "**Godot Version:** ${{ env.GODOT_VERSION }}" >> $GITHUB_STEP_SUMMARY
           echo "**Commit:** \`${{ github.sha }}\`" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "#### TapTap Plugin" >> $GITHUB_STEP_SUMMARY
-          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
-          ls -lh bin/release/godot3_taptap/*.xcframework 2>/dev/null >> $GITHUB_STEP_SUMMARY || echo "Not built" >> $GITHUB_STEP_SUMMARY
-          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "#### ASA Plugin" >> $GITHUB_STEP_SUMMARY
+          echo "#### ASA Plugin (Temporary: ASA-only build)" >> $GITHUB_STEP_SUMMARY
           echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
           ls -lh bin/release/godot3_asa/*.xcframework 2>/dev/null >> $GITHUB_STEP_SUMMARY || echo "Not built" >> $GITHUB_STEP_SUMMARY
           echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
