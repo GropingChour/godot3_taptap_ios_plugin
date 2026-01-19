@@ -87,21 +87,29 @@ jobs:
           scons target=release_debug arch=arm64 simulator=yes plugin=godot3_asa version=${{ env.GODOT_VERSION }}
           scons target=release_debug arch=x86_64 simulator=yes plugin=godot3_asa version=${{ env.GODOT_VERSION }}
           
-          # Create fat simulator binary
+          # Create fat simulator binary (must be fat for XCFramework)
           mkdir -p bin/simulator
           lipo -create \
             bin/libgodot3_asa.arm64-simulator.release_debug.a \
             bin/libgodot3_asa.x86_64-simulator.release_debug.a \
             -output bin/simulator/libgodot3_asa.a
           
-          # Rename device binary for XCFramework (must be .a without suffix)
-          cp bin/libgodot3_asa.arm64-ios.release_debug.a bin/libgodot3_asa.device.a
+          echo "Checking simulator fat binary:"
+          lipo -info bin/simulator/libgodot3_asa.a
+          
+          # Rename device binary for XCFramework
+          cp bin/libgodot3_asa.arm64-ios.release_debug.a bin/device/libgodot3_asa.a
+          mkdir -p bin/device
+          mv bin/libgodot3_asa.arm64-ios.release_debug.a bin/device/libgodot3_asa.a
+          
+          echo "Checking device binary:"
+          lipo -info bin/device/libgodot3_asa.a
           
           # Create XCFrameworks
           mkdir -p bin/release/godot3_asa
           
           xcodebuild -create-xcframework \
-            -library bin/libgodot3_asa.device.a \
+            -library bin/device/libgodot3_asa.a \
             -library bin/simulator/libgodot3_asa.a \
             -output bin/release/godot3_asa/godot3_asa.release.xcframework
           
