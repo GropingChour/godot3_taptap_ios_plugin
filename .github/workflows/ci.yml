@@ -77,26 +77,72 @@ jobs:
           export SCONS_CACHE=${{ env.SCONS_CACHE }}
           echo "SCons cache directory: $SCONS_CACHE"
           
-          ./scripts/release_xcframework.sh ${{ env.GODOT_VERSION }}
+          # Temporary: Only compile ASA plugin for faster builds
+          echo "Building only godot3_asa plugin..."
+          
+          # Build device (arm64)
+          scons target=release_debug arch=arm64 simulator=no plugin=godot3_asa version=${{ env.GODOT_VERSION }}
+          
+          # Build simulator (arm64 + x86_64)
+          scons target=release_debug arch=arm64 simulator=yes plugin=godot3_asa version=${{ env.GODOT_VERSION }}
+          scons target=release_debug arch=x86_64 simulator=yes plugin=godot3_asa version=${{ env.GODOT_VERSION }}
+          
+          # Create fat simulator binary
+          mkdir -p bin/simulator
+          lipo -create \
+            bin/libgodot3_asa.arm64-simulator.release_debug.a \
+            bin/libgodot3_asa.x86_64-simulator.release_debug.a \
+            -output bin/simulator/libgodot3_asa.simulator.release_debug.a
+          
+          # Create XCFrameworks
+          mkdir -p bin/release/godot3_asa
+          
+          xcodebuild -create-xcframework \
+            -library bin/libgodot3_asa.arm64-ios.release_debug.a \
+            -library bin/simulator/libgodot3_asa.simulator.release_debug.a \
+            -output bin/release/godot3_asa/godot3_asa.release.xcframework
+          
+          # Copy as .debug.xcframework
+          cp -r bin/release/godot3_asa/godot3_asa.release.xcframework \
+            bin/release/godot3_asa/godot3_asa.debug.xcframework
+          
+          # Copy .gdip
+          cp plugins/godot3_asa/godot3_asa.gdip bin/release/godot3_asa/
           ls -l bin/release
 
       - name: Reorganize for distribution
         run: |
           echo "Reorganizing directory structure for distribution..."
           
-          # Create final distribution structure (res://ios/plugins/)
+          # Create final distribution structure for TapTap
           mkdir -p bin/dist/godot3_taptap/ios/plugins/godot3_taptap
           mkdir -p bin/dist/godot3_taptap/addons
           
-          # Copy XCFrameworks and .gdip to ios/plugins
+          # Copy TapTap XCFrameworks and .gdip to ios/plugins
           cp -r bin/release/godot3_taptap/*.xcframework bin/dist/godot3_taptap/ios/plugins/godot3_taptap/
           cp bin/release/godot3_taptap/godot3_taptap.gdip bin/dist/godot3_taptap/ios/plugins/godot3_taptap/
           
           # Copy TapTap SDK frameworks to plugin directory (embedded dependencies)
           cp -r plugins/godot3_taptap/sdk bin/dist/godot3_taptap/ios/plugins/godot3_taptap/
           
-          # Copy addons directory (includes key generation tools)
+          # Copy TapTap addons directory
           cp -r addons/godot3_taptap bin/dist/godot3_taptap/addons/godot3_taptap
+          
+          # Create final distribution structure for ASA
+          mkdir -p bin/dist/godot3_asa/ios/plugins/godot3_asa
+          mkdir -p bin/dist/godot3_asa/addons
+          
+          # Copy ASA XCFrameworks and .gdip to ios/plugins
+          if [ -d "bin/release/godot3_asa" ]; then
+            cp -r bin/release/godot3_asa/*.xcframework bin/dist/godot3_asa/ios/plugins/godot3_asa/
+            cp bin/release/godot3_asa/godot3_asa.gdip bin/dist/godot3_asa/ios/plugins/godot3_asa/
+            
+            # Copy ASA addons directory
+            cp -r addons/godot3_asa bin/dist/godot3_asa/addons/godot3_asa
+            echo "ASA plugin packaged successfully"
+          else
+            echo "ASA plugin not found, skipping"
+          fi
           
           echo "Distribution structure created successfully"
 
@@ -107,14 +153,29 @@ jobs:
           echo ""
           echo "Files in distribution:"
           find bin/dist -type f
+          echo ""
+          echo "TapTap Plugin:"
+          ls -lh bin/dist/godot3_taptap/ios/plugins/godot3_taptap/*.xcframework 2>/dev/null || echo "Not found"
+          echo ""
+          echo "ASA Plugin:"
+          ls -lh bin/dist/godot3_asa/ios/plugins/godot3_asa/*.xcframework 2>/dev/null || echo "Not found"
 
-      - name: Upload build artifacts
+      - name: Upload TapTap plugin artifacts
         uses: actions/upload-artifact@v4
         with:
           name: godot3_taptap-ios-plugin-${{ github.sha }}
           path: bin/dist/godot3_taptap/
           retention-days: 14
           if-no-files-found: error
+          compression-level: 6
+
+      - name: Upload ASA plugin artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: godot3_asa-ios-plugin-${{ github.sha }}
+          path: bin/dist/godot3_asa/
+          retention-days: 14
+          if-no-files-found: warn
           compression-level: 6
 
       - name: Create build summary
@@ -124,7 +185,12 @@ jobs:
           echo "**Godot Version:** ${{ env.GODOT_VERSION }}" >> $GITHUB_STEP_SUMMARY
           echo "**Commit:** \`${{ github.sha }}\`" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "#### Built Artifacts" >> $GITHUB_STEP_SUMMARY
+          echo "#### TapTap Plugin" >> $GITHUB_STEP_SUMMARY
           echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
-          ls -lh bin/release/godot3_taptap/*.xcframework >> $GITHUB_STEP_SUMMARY
+          ls -lh bin/release/godot3_taptap/*.xcframework 2>/dev/null >> $GITHUB_STEP_SUMMARY || echo "Not built" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "#### ASA Plugin" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          ls -lh bin/release/godot3_asa/*.xcframework 2>/dev/null >> $GITHUB_STEP_SUMMARY || echo "Not built" >> $GITHUB_STEP_SUMMARY
           echo "\`\`\`" >> $GITHUB_STEP_SUMMARY

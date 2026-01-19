@@ -1,0 +1,85 @@
+/*************************************************************************/
+/*  godot3_asa.h                                                         */
+/*************************************************************************/
+/*                       This file is part of:                           */
+/*                           GODOT ENGINE                                */
+/*                      https://godotengine.org                          */
+/*************************************************************************/
+/* Copyright (c) 2007-2021 Juan Linietsky, Ariel Manzur.                 */
+/* Copyright (c) 2014-2021 Godot Engine contributors (cf. AUTHORS.md).   */
+/*                                                                       */
+/* Permission is hereby granted, free of charge, to any person obtaining */
+/* a copy of this software and associated documentation files (the       */
+/* "Software"), to deal in the Software without restriction, including   */
+/* without limitation the rights to use, copy, modify, merge, publish,   */
+/* distribute, sublicense, and/or sell copies of the Software, and to    */
+/* permit persons to whom the Software is furnished to do so, subject to */
+/* the following conditions:                                             */
+/*                                                                       */
+/* The above copyright notice and this permission notice shall be        */
+/* included in all copies or substantial portions of the Software.       */
+/*                                                                       */
+/* THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,       */
+/* EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF    */
+/* MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.*/
+/* IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY  */
+/* CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,  */
+/* TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE     */
+/* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                */
+/*************************************************************************/
+
+#ifndef GODOT3_ASA_H
+#define GODOT3_ASA_H
+
+#include "core/version.h"
+
+#if VERSION_MAJOR == 4
+#include "core/object/class_db.h"
+#else
+#include "core/object.h"
+#endif
+
+class Godot3ASA : public Object {
+
+	GDCLASS(Godot3ASA, Object);
+
+	static Godot3ASA *instance;
+	static void _bind_methods();
+
+public:
+	/**
+	 * 获取ASA归因token
+	 * 建议在App首次启动时调用（获取网络权限后延迟500-1000ms）
+	 * 信号: onASATokenReceived(token: String, error_code: int, error_message: String)
+	 */
+	void requestAttributionToken();
+
+	/**
+	 * 使用token请求完整的归因数据
+	 * 在获取token后延迟500-1000ms调用
+	 * @param token - 通过requestAttributionToken获取的token
+	 * 信号: onASAAttributionReceived(attribution_data: String, error_code: int, error_message: String)
+	 */
+	void requestAttributionData(const String &token);
+
+	/**
+	 * 一键完成归因（内部自动获取token + 请求归因数据）
+	 * 推荐使用此方法，简化调用流程
+	 * 建议在App首次启动时调用（获取网络权限后延迟500-1000ms）
+	 * 信号: onASAAttributionReceived(attribution_data: String, error_code: int, error_message: String)
+	 */
+	void performAttribution();
+
+	/**
+	 * 检查当前iOS版本是否支持AdServices (需要iOS 14.3+)
+	 * @return true - 支持, false - 不支持
+	 */
+	bool isSupported();
+
+	static Godot3ASA *get_singleton();
+
+	Godot3ASA();
+	~Godot3ASA();
+};
+
+#endif // GODOT3_ASA_H

@@ -65,6 +65,7 @@ jobs:
 
       - name: Package for distribution
         run: |
+          # Package TapTap Plugin
           mkdir -p bin/dist/godot3_taptap/ios/plugins/godot3_taptap
           mkdir -p bin/dist/godot3_taptap/addons
           
@@ -73,7 +74,39 @@ jobs:
           cp -r plugins/godot3_taptap/sdk bin/dist/godot3_taptap/ios/plugins/godot3_taptap/
           cp -r addons/godot3_taptap bin/dist/godot3_taptap/addons/godot3_taptap
           
-          # Create README for distribution
+          # Package ASA Plugin
+          if [ -d "bin/release/godot3_asa" ]; then
+            mkdir -p bin/dist/godot3_asa/ios/plugins/godot3_asa
+            mkdir -p bin/dist/godot3_asa/addons
+            
+            cp -r bin/release/godot3_asa/*.xcframework bin/dist/godot3_asa/ios/plugins/godot3_asa/
+            cp bin/release/godot3_asa/godot3_asa.gdip bin/dist/godot3_asa/ios/plugins/godot3_asa/
+            cp -r addons/godot3_asa bin/dist/godot3_asa/addons/godot3_asa
+            
+            cat > bin/dist/godot3_asa/README.md << 'EOF'
+          # Godot 3 ASA iOS Plugin
+          
+          Apple Search Ads Attribution integration for Godot 3.x iOS projects.
+          
+          ## Installation
+          
+          1. Copy the entire `godot3_asa` folder to your Godot project's `res://ios/plugins/` directory
+          2. Copy the `addons/godot3_asa` folder to your project's `res://addons/` directory
+          3. Enable the plugin in Project Settings → Plugins
+          4. Configure in Project → Export → iOS → Options → Plugins
+          
+          ## Requirements
+          
+          - iOS 14.3 or later
+          - AdServices.framework (automatically linked)
+          
+          ## Documentation
+          
+          See https://github.com/GropingChour/godot3_taptap_ios_plugin for full documentation
+          EOF
+          fi
+          
+          # Create TapTap README
           cat > bin/dist/godot3_taptap/README.md << 'EOF'
           # Godot 3 TapTap iOS Plugin
           
@@ -89,10 +122,15 @@ jobs:
           See https://github.com/GropingChour/godot3_taptap_ios_plugin for full documentation
           EOF
           
-          # Create archive
+          # Create archives
           cd bin/dist
           zip -r godot3_taptap-ios-plugin.zip godot3_taptap/
           tar -czf godot3_taptap-ios-plugin.tar.gz godot3_taptap/
+          
+          if [ -d "godot3_asa" ]; then
+            zip -r godot3_asa-ios-plugin.zip godot3_asa/
+            tar -czf godot3_asa-ios-plugin.tar.gz godot3_asa/
+          fi
 
       - name: Upload Release Artifact
         uses: actions/upload-artifact@v4
@@ -101,6 +139,8 @@ jobs:
           path: |
             bin/dist/godot3_taptap-ios-plugin.zip
             bin/dist/godot3_taptap-ios-plugin.tar.gz
+            bin/dist/godot3_asa-ios-plugin.zip
+            bin/dist/godot3_asa-ios-plugin.tar.gz
           retention-days: 90
           compression-level: 0  # Already compressed
 
@@ -111,20 +151,26 @@ jobs:
           files: |
             bin/dist/godot3_taptap-ios-plugin.zip
             bin/dist/godot3_taptap-ios-plugin.tar.gz
+            bin/dist/godot3_asa-ios-plugin.zip
+            bin/dist/godot3_asa-ios-plugin.tar.gz
           draft: false
           prerelease: false
           generate_release_notes: true
           body: |
-            ## Godot 3 TapTap iOS Plugin Release
+            ## Godot 3 iOS Plugins Release
+            
+            ### Plugins Included
+            - **godot3_taptap** - TapTap SDK integration (Login, Compliance, DLC)
+            - **godot3_asa** - Apple Search Ads attribution
             
             ### Installation
-            1. Download the `.zip` or `.tar.gz` file
+            1. Download the plugin(s) you need (`.zip` or `.tar.gz`)
             2. Extract to your Godot project
-            3. Follow the README instructions
+            3. Follow the README instructions in each plugin folder
             
             ### What's Included
             - XCFrameworks for Device and Simulator (arm64 + x86_64)
-            - TapTap SDK dependencies
+            - SDK dependencies (TapTap) / System frameworks (ASA)
             - GDScript addons and tools
             - Configuration utilities
         env:
@@ -138,11 +184,22 @@ jobs:
           echo "**Godot Version:** ${{ env.GODOT_VERSION }}" >> $GITHUB_STEP_SUMMARY
           echo "**Commit:** \`${{ github.sha }}\`" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "#### Package Contents" >> $GITHUB_STEP_SUMMARY
+          echo "#### TapTap Plugin Contents" >> $GITHUB_STEP_SUMMARY
           echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
           find bin/dist/godot3_taptap -type f | head -20 >> $GITHUB_STEP_SUMMARY
           echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
+          if [ -d "bin/dist/godot3_asa" ]; then
+            echo "#### ASA Plugin Contents" >> $GITHUB_STEP_SUMMARY
+            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+            find bin/dist/godot3_asa -type f | head -20 >> $GITHUB_STEP_SUMMARY
+            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+          fi
           echo "#### Download Links" >> $GITHUB_STEP_SUMMARY
           echo "- [godot3_taptap-ios-plugin.zip](https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/godot3_taptap-ios-plugin.zip)" >> $GITHUB_STEP_SUMMARY
           echo "- [godot3_taptap-ios-plugin.tar.gz](https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/godot3_taptap-ios-plugin.tar.gz)" >> $GITHUB_STEP_SUMMARY
+          if [ -d "bin/dist/godot3_asa" ]; then
+            echo "- [godot3_asa-ios-plugin.zip](https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/godot3_asa-ios-plugin.zip)" >> $GITHUB_STEP_SUMMARY
+            echo "- [godot3_asa-ios-plugin.tar.gz](https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/godot3_asa-ios-plugin.tar.gz)" >> $GITHUB_STEP_SUMMARY
+          fi
