@@ -1,172 +1,60 @@
 name: Continuous integration
-on: 
-  push:
-    branches: [ main, master, develop ]
-  pull_request:
-    branches: [ main, master, develop ]
-
-env:
-  GODOT_VERSION: "3.x"
-  SCONS_CACHE: "${{ github.workspace }}/.scons-cache"
+on: [push, pull_request]
 
 jobs:
   build:
     name: Build (macOS)
-    runs-on: "macos-14"  # Use macOS-14 for Apple Silicon support
+    runs-on: "macos-latest"
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
           submodules: recursive
 
       - name: Set up Python 3.x
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: '3.x'
           architecture: 'x64'
+          cache: 'pip'
 
-      - name: Cache SCons build artifacts
+      - name: Cache SCons
         uses: actions/cache@v4
         with:
           path: |
-            ${{ env.SCONS_CACHE }}
+            ~/.scons_cache
             godot/.scons_cache
-            godot/bin
-          key: ${{ runner.os }}-scons-${{ hashFiles('godot/**/*.cpp', 'godot/**/*.h') }}
+          key: ${{ runner.os }}-scons-${{ hashFiles('godot/**/*.cpp', 'godot/**/*.h', 'plugins/**/*.cpp', 'plugins/**/*.h', 'plugins/**/*.mm') }}
           restore-keys: |
             ${{ runner.os }}-scons-
 
       - name: Cache Godot headers
         uses: actions/cache@v4
         with:
-          path: |
-            godot/bin/*.a
-            ios_plugins/**/*.h
-          key: ${{ runner.os }}-godot-headers-${{ env.GODOT_VERSION }}-${{ hashFiles('godot/version.py') }}
+          path: godot/bin
+          key: ${{ runner.os }}-godot-headers-3x-${{ hashFiles('godot/version.py', 'godot/core/**') }}
           restore-keys: |
-            ${{ runner.os }}-godot-headers-${{ env.GODOT_VERSION }}-
+            ${{ runner.os }}-godot-headers-3x-
 
-      - name: Install Python dependencies
+      - name: Configuring Python
         run: |
           python -c "import sys; print(sys.version)"
-          python -m pip install --upgrade pip
           python -m pip install scons
           python --version
           scons --version
 
-      - name: Make scripts executable
-        run: chmod +x ./scripts/*
-
-      - name: Ensure bin directory exists
-        run: mkdir -p bin
-
       - name: Generate Headers
         run: |
-          # Check if headers already exist in cache
-          if [ ! -f "godot/bin/libgodot.iphone.opt.arm64.a" ]; then
-            echo "Generating Godot headers..."
-            ./scripts/generate_headers.sh ${{ env.GODOT_VERSION }} || true
-          else
-            echo "Using cached Godot headers"
-          fi
+          ./scripts/generate_headers.sh 3.x || true
 
       - name: Compile Plugins
         run: |
-          # Set SCons cache directory
-          export SCONS_CACHE=${{ env.SCONS_CACHE }}
-          echo "SCons cache directory: $SCONS_CACHE"
-          
-          # Temporary: Only compile ASA plugin for faster builds
-          echo "Building only godot3_asa plugin..."
-          
-          # Build device (arm64)
-          scons target=release_debug arch=arm64 simulator=no plugin=godot3_asa version=${{ env.GODOT_VERSION }}
-          
-          # Build simulator (arm64 + x86_64)
-          scons target=release_debug arch=arm64 simulator=yes plugin=godot3_asa version=${{ env.GODOT_VERSION }}
-          scons target=release_debug arch=x86_64 simulator=yes plugin=godot3_asa version=${{ env.GODOT_VERSION }}
-          
-          # Create fat simulator binary (must be fat for XCFramework)
-          mkdir -p bin/simulator
-          lipo -create \
-            bin/libgodot3_asa.arm64-simulator.release_debug.a \
-            bin/libgodot3_asa.x86_64-simulator.release_debug.a \
-            -output bin/simulator/libgodot3_asa.a
-          
-          echo "Checking simulator fat binary:"
-          lipo -info bin/simulator/libgodot3_asa.a
-          
-          # Move device binary for XCFramework
-          mkdir -p bin/device
-          mv bin/libgodot3_asa.arm64-ios.release_debug.a bin/device/libgodot3_asa.a
-          
-          echo "Checking device binary:"
-          lipo -info bin/device/libgodot3_asa.a
-          
-          # Create XCFrameworks
-          mkdir -p bin/release/godot3_asa
-          
-          xcodebuild -create-xcframework \
-            -library bin/device/libgodot3_asa.a \
-            -library bin/simulator/libgodot3_asa.a \
-            -output bin/release/godot3_asa/godot3_asa.release.xcframework
-          
-          # Copy as .debug.xcframework
-          cp -r bin/release/godot3_asa/godot3_asa.release.xcframework \
-            bin/release/godot3_asa/godot3_asa.debug.xcframework
-          
-          # Copy .gdip
-          cp plugins/godot3_asa/godot3_asa.gdip bin/release/godot3_asa/
+          ./scripts/release_xcframework.sh 3.x
           ls -l bin/release
 
-      - name: Reorganize for distribution
-        run: |
-          echo "Reorganizing directory structure for distribution..."
-          
-          # Temporary: Only package ASA plugin (since we're only building ASA)
-          # Create final distribution structure for ASA
-          mkdir -p bin/dist/godot3_asa/ios/plugins/godot3_asa
-          mkdir -p bin/dist/godot3_asa/addons
-          
-          # Copy ASA XCFrameworks and .gdip to ios/plugins
-          cp -r bin/release/godot3_asa/*.xcframework bin/dist/godot3_asa/ios/plugins/godot3_asa/
-          cp bin/release/godot3_asa/godot3_asa.gdip bin/dist/godot3_asa/ios/plugins/godot3_asa/
-          
-          # Copy ASA addons directory
-          cp -r addons/godot3_asa bin/dist/godot3_asa/addons/godot3_asa
-          echo "ASA plugin packaged successfully"
-          
-          echo "Distribution structure created successfully"
-
-      - name: List release structure
-        run: |
-          echo "Distribution directory structure:"
-          find bin/dist -type d
-          echo ""
-          echo "Files in distribution:"
-          find bin/dist -type f
-          echo ""
-          echo "ASA Plugin:"
-          ls -lh bin/dist/godot3_asa/ios/plugins/godot3_asa/*.xcframework 2>/dev/null || echo "Not found"
-
-      - name: Upload ASA plugin artifacts
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
-          name: godot3_asa-ios-plugin-${{ github.sha }}
-          path: bin/dist/godot3_asa/
+          name: plugins
+          path: bin/release/*
           retention-days: 14
           if-no-files-found: error
-          compression-level: 6
-
-      - name: Create build summary
-        run: |
-          echo "### Build Summary :rocket:" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Godot Version:** ${{ env.GODOT_VERSION }}" >> $GITHUB_STEP_SUMMARY
-          echo "**Commit:** \`${{ github.sha }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "#### ASA Plugin (Temporary: ASA-only build)" >> $GITHUB_STEP_SUMMARY
-          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
-          ls -lh bin/release/godot3_asa/*.xcframework 2>/dev/null >> $GITHUB_STEP_SUMMARY || echo "Not built" >> $GITHUB_STEP_SUMMARY
-          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY

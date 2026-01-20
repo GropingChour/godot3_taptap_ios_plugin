@@ -34,6 +34,10 @@ var singleton
 # HTTP 请求节点
 var http_request: HTTPRequest
 
+# 待处理的上报请求队列（归因完成前暂存）
+var pending_reports: Array = []
+var is_attribution_pending: bool = false
+
 # 信号定义
 signal onASAAttributionReceived(data, code, message)
 signal onASATokenReceived(token, code, message)
@@ -72,16 +76,15 @@ func is_supported() -> bool:
 	return singleton.isSupported()
 
 func perform_attribution() -> void:
-	"""
-	执行 ASA 归因（推荐使用）
-	一键完成 token 获取和归因数据请求
-	建议在 App 首次启动时，获取网络权限后延迟 500-1000ms 调用
-	"""
+	# 执行 ASA 归因（推荐使用）
+	# 一键完成 token 获取和归因数据请求
+	# 建议在 App 首次启动时，获取网络权限后延迟 500-1000ms 调用
 	if not singleton:
 		push_error("[ASA] Singleton not available")
 		return
 	
 	print("[ASA] Performing attribution...")
+	is_attribution_pending = true
 	singleton.performAttribution()
 
 func request_attribution_token() -> void:
@@ -143,13 +146,18 @@ func set_appsa_from_key(from_key: String) -> void:
 	print("[ASA] AppSA from key set: ", from_key)
 
 func report_activation(app_name: String = "") -> void:
-	"""
-	上报激活数据到 AppSA
-	应在归因成功后调用，且仅在首次激活时上报一次
+	# 上报激活数据到 AppSA
+	# 应在归因成功后调用，且仅在首次激活时上报一次
+	# Args:
+	#     app_name: 应用名称（可选，默认从 ProjectSettings 获取）
 	
-	Args:
-	    app_name: 应用名称（可选，默认从 ProjectSettings 获取）
-	"""
+	# 如果归因正在进行中，加入队列等待
+	if is_attribution_pending:
+		print("[ASA] Attribution pending, queueing activation report...")
+		pending_reports.append({"type": "activation", "app_name": app_name})
+		return
+	
+	# 归因未完成，直接返回
 	if not is_attributed:
 		print("[ASA] ERROR: Cannot report activation: attribution data not available")
 		return
@@ -162,6 +170,10 @@ func report_activation(app_name: String = "") -> void:
 		print("[ASA] ERROR: AppSA from_key not set, call set_appsa_from_key() first")
 		return
 	
+	_do_report_activation(app_name)
+
+func _do_report_activation(app_name: String) -> void:
+	# 实际执行激活上报的内部方法
 	var device_info = _get_device_info()
 	if app_name.empty():
 		if ProjectSettings.has_setting("application/config/name"):
@@ -279,6 +291,19 @@ func _report_event(event_name: String, event_values: Dictionary, is_instant: boo
 	    is_instant: true=按次上报, false=汇总上报
 	    event_date: 事件日期（仅汇总上报需要），格式 "YYYY-MM-DD"
 	"""
+	# 如果归因正在进行中，加入队列等待
+	if is_attribution_pending:
+		print("[ASA] Attribution pending, queueing event: ", event_name)
+		pending_reports.append({
+			"type": "event",
+			"event_name": event_name,
+			"event_values": event_values,
+			"is_instant": is_instant,
+			"event_date": event_date
+		})
+		return
+	
+	# 归因已完成，但用户不是来自 ASA，跳过上报
 	if not is_attributed or not attribution_data.get("attribution", false):
 		print("[ASA] User is not from ASA, skip event report: ", event_name)
 		return
@@ -287,6 +312,12 @@ func _report_event(event_name: String, event_values: Dictionary, is_instant: boo
 		push_error("[ASA] AppSA from_key not set")
 		return
 	
+	_do_report_event(event_name, event_values, is_instant, event_date)
+
+func _do_report_event(event_name: String, event_values: Dictionary, is_instant: bool, event_date: String = "") -> void:
+	"""
+	实际执行事件上报的内部方法
+	"""
 	var data = {
 		"org_id": str(attribution_data.get("orgId", "")),
 		"campaign_id": str(attribution_data.get("campaignId", "")),
@@ -385,11 +416,18 @@ func _on_attribution_received(data: String, code: int, message: String) -> void:
 		if json.error == OK:
 			attribution_data = json.result
 			is_attributed = true
+			is_attribution_pending = false  # 归因完成，清除待处理标志
 			print("[ASA] Attribution data parsed successfully")
 			print("[ASA] Attribution: ", attribution_data.get("attribution", false))
 			print("[ASA] Campaign ID: ", attribution_data.get("campaignId", ""))
+			
+			# 处理队列中的待处理上报
+			_process_pending_reports()
 		else:
 			print("[ASA] ERROR: Failed to parse attribution data")
+			is_attribution_pending = false  # 解析失败也清除标志
+	else:
+		is_attribution_pending = false  # 归因失败，清除标志
 	
 	emit_signal("onASAAttributionReceived", data, code, message)
 
@@ -397,6 +435,27 @@ func _on_token_received(token: String, code: int, message: String) -> void:
 	"""Token 接收回调"""
 	print("[ASA] Token received: code=", code)
 	emit_signal("onASATokenReceived", token, code, message)
+
+func _process_pending_reports() -> void:
+	"""处理队列中的待处理上报"""
+	if pending_reports.empty():
+		return
+	
+	print("[ASA] Processing %d pending reports..." % pending_reports.size())
+	
+	for report in pending_reports:
+		if report["type"] == "activation":
+			_do_report_activation(report["app_name"])
+		elif report["type"] == "event":
+			_do_report_event(
+				report["event_name"],
+				report["event_values"],
+				report["is_instant"],
+				report["event_date"]
+			)
+	
+	pending_reports.clear()
+	print("[ASA] All pending reports processed")
 
 func _get_device_info() -> Dictionary:
 	"""获取设备信息"""

@@ -1,6 +1,6 @@
 [config]
 name="Godot3TapTap"
-binary="godot3_taptap.xcframework"
+binary="godot3_taptap.release.xcframework"
 
 initialization="register_godot3_taptap_types"
 deinitialization="unregister_godot3_taptap_types"
