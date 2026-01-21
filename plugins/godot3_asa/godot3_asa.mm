@@ -33,8 +33,15 @@
 
 - (BOOL)isAdServicesSupported {
 	if (@available(iOS 14.3, *)) {
+		// 检查 AAAttribution 类是否存在（模拟器上可能不可用）
+		Class aaClass = NSClassFromString(@"AAAttribution");
+		if (aaClass == nil) {
+			NSLog(@"[Godot3ASA] AAAttribution class not found (may not be available on simulator)");
+			return NO;
+		}
 		return YES;
 	}
+	NSLog(@"[Godot3ASA] iOS version too old (requires iOS 14.3+)");
 	return NO;
 }
 
@@ -50,7 +57,7 @@
 				int errorCode = (int)[error code];
 				NSString *errorMessage = [error localizedDescription];
 				
-				NSLog(@"[ASA] Token request failed: code=%ld, message=%@", (long)errorCode, errorMessage);
+				NSLog(@"[Godot3ASA] Token request failed: code=%ld, message=%@", (long)errorCode, errorMessage);
 				
 				// 发送失败信号给Godot
 				Godot3ASA::get_singleton()->emit_signal(
@@ -61,7 +68,7 @@
 				);
 			} else if (token != nil && token.length > 0) {
 				// 成功获取token
-				NSLog(@"[ASA] Token received successfully, length: %lu", (unsigned long)token.length);
+				NSLog(@"[Godot3ASA] Token received successfully, length: %lu", (unsigned long)token.length);
 				
 				// 发送成功信号给Godot
 				Godot3ASA::get_singleton()->emit_signal(
@@ -72,7 +79,7 @@
 				);
 			} else {
 				// Token为空
-				NSLog(@"[ASA] Token is empty");
+				NSLog(@"[Godot3ASA] Token is empty");
 				Godot3ASA::get_singleton()->emit_signal(
 					"onASATokenReceived",
 					"",
@@ -83,7 +90,7 @@
 		});
 	} else {
 		// iOS版本不支持
-		NSLog(@"[ASA] AdServices not supported on this iOS version (requires iOS 14.3+)");
+		NSLog(@"[Godot3ASA] AdServices not supported on this iOS version (requires iOS 14.3+)");
 		Godot3ASA::get_singleton()->emit_signal(
 			"onASATokenReceived",
 			"",
@@ -95,7 +102,7 @@
 
 - (void)requestAttributionDataWithToken:(NSString *)token {
 	if (!token || token.length == 0) {
-		NSLog(@"[ASA] Invalid token");
+		NSLog(@"[Godot3ASA] Invalid token");
 		Godot3ASA::get_singleton()->emit_signal(
 			"onASAAttributionReceived",
 			"",
@@ -115,7 +122,7 @@
 		[request setHTTPBody:[token dataUsingEncoding:NSUTF8StringEncoding]];
 		[request setTimeoutInterval:5.0]; // 5秒超时
 		
-		NSLog(@"[ASA] Requesting attribution data...");
+		NSLog(@"[Godot3ASA] Requesting attribution data...");
 		
 		// 发起请求
 		NSURLSessionDataTask *task = [[NSURLSession sharedSession] dataTaskWithRequest:request
@@ -126,7 +133,7 @@
 			
 			if (error != nil) {
 				// 网络错误
-				NSLog(@"[ASA] Network error: %@", [error localizedDescription]);
+				NSLog(@"[Godot3ASA] Network error: %@", [error localizedDescription]);
 				dispatch_async(dispatch_get_main_queue(), ^{
 					Godot3ASA::get_singleton()->emit_signal(
 						"onASAAttributionReceived",
@@ -142,7 +149,7 @@
 				// 成功获取归因数据
 				if (data && data.length > 0) {
 					NSString *jsonString = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
-					NSLog(@"[ASA] Attribution data received: %@", jsonString);
+					NSLog(@"[Godot3ASA] Attribution data received: %@", jsonString);
 					
 					dispatch_async(dispatch_get_main_queue(), ^{
 						Godot3ASA::get_singleton()->emit_signal(
@@ -153,7 +160,7 @@
 						);
 					});
 				} else {
-					NSLog(@"[ASA] Empty response data");
+					NSLog(@"[Godot3ASA] Empty response data");
 					dispatch_async(dispatch_get_main_queue(), ^{
 						Godot3ASA::get_singleton()->emit_signal(
 							"onASAAttributionReceived",
@@ -166,7 +173,7 @@
 			} else {
 				// HTTP错误
 				NSString *errorMsg = [NSString stringWithFormat:@"HTTP %d", statusCode];
-				NSLog(@"[ASA] HTTP error: %@", errorMsg);
+				NSLog(@"[Godot3ASA] HTTP error: %@", errorMsg);
 				
 				dispatch_async(dispatch_get_main_queue(), ^{
 					Godot3ASA::get_singleton()->emit_signal(
@@ -193,7 +200,7 @@
 			if (error != nil) {
 				int errorCode = (int)[error code];
 				NSString *errorMessage = [error localizedDescription];
-				NSLog(@"[ASA] Full attribution failed at token stage: %@", errorMessage);
+				NSLog(@"[Godot3ASA] Full attribution failed at token stage: %@", errorMessage);
 				
 				Godot3ASA::get_singleton()->emit_signal(
 					"onASAAttributionReceived",
@@ -205,7 +212,7 @@
 			}
 			
 			if (!token || token.length == 0) {
-				NSLog(@"[ASA] Full attribution failed: empty token");
+				NSLog(@"[Godot3ASA] Full attribution failed: empty token");
 				Godot3ASA::get_singleton()->emit_signal(
 					"onASAAttributionReceived",
 					"",
@@ -219,7 +226,7 @@
 			[self requestAttributionDataWithToken:token];
 		});
 	} else {
-		NSLog(@"[ASA] Full attribution not supported on this iOS version");
+		NSLog(@"[Godot3ASA] Full attribution not supported on this iOS version");
 		Godot3ASA::get_singleton()->emit_signal(
 			"onASAAttributionReceived",
 			"",
@@ -299,7 +306,7 @@ Godot3ASA::Godot3ASA() {
 		asa_delegate = [[GodotASADelegate alloc] init];
 	}
 	
-	NSLog(@"[ASA] Godot3ASA plugin initialized");
+	NSLog(@"[Godot3ASA] Godot3ASA plugin initialized");
 }
 
 Godot3ASA::~Godot3ASA() {
