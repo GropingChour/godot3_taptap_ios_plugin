@@ -11,6 +11,9 @@ jobs:
         with:
           submodules: recursive
 
+      - name: Make scripts executable
+        run: chmod +x scripts/*.sh
+
       - name: Set up Python 3.x
         uses: actions/setup-python@v5
         with:

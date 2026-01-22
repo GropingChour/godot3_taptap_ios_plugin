@@ -1,14 +1,8 @@
 extends Node
 
-# ASA 归因调试面板
-# 
-# 显示 ASA 归因过程中的 Token 和归因数据
-# 将此节点添加到场景中即可自动显示调试信息
+# ASA归因调试面板 - 用于可视化测试归因和上报功能
 
-# ============================================================================
-# UI 节点
-# ============================================================================
-
+# UI节点
 var ui_panel: Panel
 var token_label: Label
 var attribution_label: TextEdit
@@ -23,80 +17,68 @@ var test_report_btn: Button
 var cached_token: String = ""
 var cached_attribution: Dictionary = {}
 
+# AppSA上报器
+var appsa_reporter: HTTPRequest
+var test_from_key = "debug_test"  # 测试用from参数
+
 # ============================================================================
 # 初始化
 # ============================================================================
 
 func _ready():
-	# 在编辑器中也显示布局，用于预览
 	var is_editor = OS.has_feature("editor")
 	var is_ios = OS.get_name() == "iOS"
 	
-	# 检查是否在 iOS 平台或编辑器
 	if not is_ios and not is_editor:
-		print("[ASA Debug] Not iOS platform or editor, debug panel disabled")
+		print("[ASA Debug] Not iOS/editor, disabled")
 		queue_free()
 		return
 	
-	# 创建调试 UI
+	# 创建AppSA上报器（测试用）
+	var AppSAReporter = load("res://addons/godot3_asa/appsa_reporter.gd")
+	appsa_reporter = AppSAReporter.new()
+	add_child(appsa_reporter)
+	appsa_reporter.set_from_key(test_from_key)
+	appsa_reporter.connect("report_success", self, "_on_test_report_success")
+	appsa_reporter.connect("report_failed", self, "_on_test_report_failed")
+	
 	call_deferred("_create_debug_ui")
 	
 	if is_editor:
-		# 编辑器模式：显示测试提示，不自动填充数据
-		print("[ASA Debug] Running in editor mode - click Test Attribution to see mock data")
+		print("[ASA Debug] Editor mode - use buttons to test")
 		call_deferred("_setup_editor_mode")
 	else:
-		# 真实运行模式：确保ASA已加载后再连接信号
-		call_deferred("_connect_to_asa")
+		call_deferred("_check_asa_support")
 
-func _connect_to_asa():
-	"""检查ASA autoload是否可用（不连接信号）"""
-	# 检查ASA是否存在
+func _check_asa_support():
+	"""检查ASA支持"""
 	if not has_node("/root/ASA"):
-		print("[ASA Debug] ERROR: ASA autoload not found")
-		_show_error("ASA autoload not found (check plugin configuration)")
+		_show_error("ASA autoload not found")
 		return
 	
-	var asa_node = get_node("/root/ASA")
-	if not asa_node:
-		print("[ASA Debug] ERROR: ASA node is null")
-		_show_error("ASA node is null")
-		return
-	
-	# 检查支持情况
-	if not asa_node.has_method("is_supported"):
-		print("[ASA Debug] ERROR: ASA node missing is_supported method")
-		_show_error("ASA plugin version mismatch")
-		return
-	
-	var _is_supported = asa_node.is_supported()
-	print("[ASA Debug] Running on iOS device, ASA support: %s" % _is_supported)
-	
-	if not _is_supported:
-		print("[ASA Debug] ERROR: ASA not supported on this device")
+	var asa = get_node("/root/ASA")
+	if not asa.is_supported():
 		_show_error("AdServices not supported (requires iOS 14.3+)")
 		return
 	
-	# 显示测试提示
-	print("[ASA Debug] Ready for testing. Click 'Test Attribution' button to start.")
-	if is_instance_valid(token_label):
-		token_label.text = "Click 'Test Attribution' button below to start"
-		token_label.add_color_override("font_color", Color(0.5, 0.8, 1.0, 1.0))
-	if is_instance_valid(attribution_label):
-		attribution_label.text = "Click the Test Attribution button to fetch ASA data"
+	print("[ASA Debug] Ready - click Test Attribution")
+	if token_label:
+		token_label.text = "Click 'Test Attribution' to start"
+		token_label.add_color_override("font_color", Color(0.5, 0.8, 1.0))
+	if attribution_label:
+		attribution_label.text = "Click Test Attribution to fetch data"
 
 func _setup_editor_mode():
-	"""编辑器模式初始化：显示测试提示"""
+	"""编辑器模式：显示Mock提示"""
 	yield(get_tree(), "idle_frame")
 	
-	if is_instance_valid(token_label):
-		token_label.text = "[Editor Mode] Click 'Test Attribution' to see mock data OR 'Fill Mock Data' to load immediately"
-		token_label.add_color_override("font_color", Color(0.5, 0.8, 1.0, 1.0))
+	if token_label:
+		token_label.text = "[Editor] Click 'Test Attribution' or 'Fill Mock Data'"
+		token_label.add_color_override("font_color", Color(0.5, 0.8, 1.0))
+	if attribution_label:
+		attribution_label.text = "[Editor] Use buttons to load mock data"
 	
-	if is_instance_valid(attribution_label):
-		attribution_label.text = "[Editor Mode] Click Test Attribution button to simulate ASA request or Fill Mock Data to load instantly"
-	
-	print("[ASA Debug] Editor mode ready - mock data will simulate network delay")
+	print("[ASA Debug] Editor ready - mock data available")
 
 # ============================================================================
 # UI 创建
@@ -663,94 +645,42 @@ func _on_fill_mock_pressed():
 		test_attribution_btn.disabled = false
 
 func _on_test_report_pressed():
-	"""测试上报激活事件（独立测试，不影响ASA正常状态）"""
-	print("[ASA Debug] Testing activation report (independent test)...")
+	"""测试AppSA上报（独立测试）"""
+	print("[ASA Debug] Testing activation report...")
 	
-	# 检查是否有归因数据
 	if cached_attribution.empty():
-		print("[ASA Debug] ERROR: No attribution data available for reporting")
+		print("[ASA Debug] No attribution data")
 		_show_attribution_error("No attribution data - cannot report")
 		return
 	
-	# 检查是否来自ASA
 	var is_from_asa = cached_attribution.get("attribution", false)
 	if not is_from_asa:
-		print("[ASA Debug] INFO: User not from ASA, but forcing report for testing...")
-		if is_instance_valid(attribution_label):
-			var current_text = attribution_label.text
-			attribution_label.text = current_text + "\n\n[INFO] Not from ASA but forcing test report..."
+		print("[ASA Debug] Not from ASA, but forcing test...")
 	
-	# 检查ASA是否可用
-	if not has_node("/root/ASA"):
-		print("[ASA Debug] ERROR: ASA autoload not found")
-		_show_attribution_error("ASA autoload not found - cannot report")
-		return
-	
-	var asa_node = get_node("/root/ASA")
-	if not asa_node:
-		print("[ASA Debug] ERROR: ASA node is null")
-		_show_attribution_error("ASA node is null - cannot report")
-		return
-	
-	# 检查是否设置了from_key
-	if asa_node.appsa_from_key.empty():
-		print("[ASA Debug] ERROR: AppSA from_key not set")
-		_show_attribution_error("AppSA from_key not set - call ASA.set_appsa_from_key() first")
-		return
-	
-	print("[ASA Debug] Sending test activation report with cached attribution data...")
-	print("[ASA Debug] Campaign ID: ", cached_attribution.get("campaignId", "N/A"))
-	print("[ASA Debug] Ad Group ID: ", cached_attribution.get("adGroupId", "N/A"))
-	
-	# 独立构造上报数据，不影响ASA的attribution_data
-	# 使用ASA节点的设备信息获取方法（统一处理，支持C++层精确获取）
-	var device_info = asa_node._get_device_info()
-	var app_name = ""
-	if ProjectSettings.has_setting("application/config/name"):
-		app_name = ProjectSettings.get_setting("application/config/name")
-	
-	var report_data = {
-		"install_time": str(OS.get_unix_time() * 1000),
-		"device_model": device_info.model,
-		"os_version": device_info.os_version,
-		"app_name": app_name,
-		"attribution": cached_attribution.get("attribution", false),
-		"org_id": str(cached_attribution.get("orgId", "")),
-		"campaign_id": str(cached_attribution.get("campaignId", "")),
-		"adgroup_id": str(cached_attribution.get("adGroupId", "")),
-		"keyword_id": str(cached_attribution.get("keywordId", "")),
-		"creativeset_id": str(cached_attribution.get("adId", "")),
-		"conversion_type": cached_attribution.get("conversionType", ""),
-		"country_or_region": cached_attribution.get("countryOrRegion", ""),
-		"click_date": cached_attribution.get("clickDate", ""),
-		"source_from": "ads",
-		"claim_type": cached_attribution.get("claimType", "Click")
-	}
-	
-	# 直接调用ASA的发送方法（使用独立数据）
-	asa_node._send_appsa_request(asa_node.APPSA_ACTIVATION_URL, report_data, "test_activation")
-	
-	# 更新UI显示
-	if is_instance_valid(attribution_label):
-		var current_text = attribution_label.text
-		attribution_label.text = current_text + "\n\n[INFO] Test activation report sent (check logs for result)"
-	
-	print("[ASA Debug] Test activation report sent - check ASA logs for result")
+	print("[ASA Debug] Sending test report - Campaign: ", cached_attribution.get("campaignId", "N/A"))
+	appsa_reporter.report_activation(cached_attribution)
 
-# ============================================================================
-# 清理
-# ============================================================================
+func _on_test_report_success(response: Dictionary):
+	"""上报成功回调"""
+	print("[ASA Debug] Report success: ", response)
+	if attribution_label:
+		attribution_label.text += "\n\n[Test Report Success]\n" + JSON.print(response, "  ")
+
+func _on_test_report_failed(error_message: String):
+	"""上报失败回调"""
+	print("[ASA Debug] Report failed: ", error_message)
+	if attribution_label:
+		attribution_label.text += "\n\n[Test Report Failed] " + error_message
 
 func _exit_tree():
-	# 清理信号连接
+	"""清理资源"""
 	if has_node("/root/ASA"):
-		var asa_node = get_node("/root/ASA")
-		if asa_node and asa_node.is_connected("onASATokenReceived", self, "_on_token_received"):
-			asa_node.disconnect("onASATokenReceived", self, "_on_token_received")
-		if asa_node and asa_node.is_connected("onASAAttributionReceived", self, "_on_attribution_received"):
-			asa_node.disconnect("onASAAttributionReceived", self, "_on_attribution_received")
+		var asa = get_node("/root/ASA")
+		if asa.is_connected("onASATokenReceived", self, "_on_token_received"):
+			asa.disconnect("onASATokenReceived", self, "_on_token_received")
+		if asa.is_connected("onASAAttributionReceived", self, "_on_attribution_received"):
+			asa.disconnect("onASAAttributionReceived", self, "_on_attribution_received")
 	
-	# 清理 UI
-	if ui_panel and is_instance_valid(ui_panel):
+	if ui_panel:
 		ui_panel.queue_free()
-	print("[ASA Debug] Debug panel removed")
+
