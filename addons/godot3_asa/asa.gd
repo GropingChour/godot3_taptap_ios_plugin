@@ -38,13 +38,18 @@ var http_request: HTTPRequest
 var pending_reports: Array = []
 var is_attribution_pending: bool = false
 
-# 信号定义
-signal onASAAttributionReceived(data, code, message)
-signal onASATokenReceived(token, code, message)
+# 信号定义（参数名与C++层保持一致）
+signal onASAAttributionReceived(attribution_data, error_code, error_message)
+signal onASATokenReceived(token, error_code, error_message)
 signal onAppSAReportSuccess(response)
 signal onAppSAReportFailed(error_message)
 
 func _ready():
+	# 创建 HTTP 请求节点（无论平台，确保测试时不报错）
+	http_request = HTTPRequest.new()
+	add_child(http_request)
+	http_request.connect("request_completed", self, "_on_http_request_completed")
+	
 	var is_ios = OS.get_name() == "iOS"
 	print("[ASA] Initializing... iOS: %s" % is_ios)
 	
@@ -69,11 +74,6 @@ func _ready():
 			print("[ASA] ERROR: Singleton is null despite Engine.has_singleton() returning true")
 	else:
 		print("[ASA] ", PLUGIN_NAME, " singleton not found")
-	
-	# 创建 HTTP 请求节点
-	http_request = HTTPRequest.new()
-	add_child(http_request)
-	http_request.connect("request_completed", self, "_on_http_request_completed")
 
 # ============================================================================
 # ASA 归因功能
@@ -442,10 +442,10 @@ func _on_attribution_received(data: String, code: int, message: String) -> void:
 	
 	emit_signal("onASAAttributionReceived", data, code, message)
 
-func _on_token_received(token: String, code: int, message: String) -> void:
+func _on_token_received(token: String, error_code: int, error_message: String) -> void:
 	"""Token 接收回调"""
-	print("[ASA] Token received: code=", code)
-	emit_signal("onASATokenReceived", token, code, message)
+	print("[ASA] Token received: code=", error_code)
+	emit_signal("onASATokenReceived", token, error_code, error_message)
 
 func _process_pending_reports() -> void:
 	"""处理队列中的待处理上报"""
@@ -471,23 +471,25 @@ func _process_pending_reports() -> void:
 func _get_device_info() -> Dictionary:
 	"""获取设备信息"""
 	var model = "iPhone"  # 默认值
-	var os_version = ""
+	var os_version = "iOS"
 	
-	# 尝试获取设备型号
-	if OS.has_feature("iOS"):
-		# iOS 设备
+	# 如果有singleton，使用C++层的精确方法获取设备信息
+	if singleton:
+		model = singleton.getDeviceModel()  # 返回 "iPhone"、"iPad" 等
+		os_version = singleton.getSystemVersion()  # 返回 "16.3" 等具体版本号
+		print("[ASA] Device info from C++: model=%s, os_version=%s" % [model, os_version])
+	else:
+		# 后备方案：使用Godot API（精度较低）
 		var device_name = OS.get_model_name()
 		if "iPad" in device_name:
 			model = "iPad"
-		else:
+		elif "iPhone" in device_name:
 			model = "iPhone"
+		else:
+			model = device_name if not device_name.empty() else "iPhone"
 		
-		# 获取系统版本
-		os_version = OS.get_name() # 可能返回 "iOS"
-		# 尝试获取更详细的版本信息
-		var sys_info = OS.get_system_info()
-		if sys_info.has("version"):
-			os_version = sys_info.version
+		os_version = OS.get_name()  # 只能返回 "iOS"
+		print("[ASA] Device info from Godot: model=%s, os_version=%s" % [model, os_version])
 	
 	return {
 		"model": model,

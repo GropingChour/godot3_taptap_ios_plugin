@@ -26,6 +26,8 @@
 - (void)requestAttributionDataWithToken:(NSString *)token;
 - (void)performFullAttribution;
 - (BOOL)isAdServicesSupported;
+- (NSString *)getDeviceModel;
+- (NSString *)getSystemVersion;
 
 @end
 
@@ -296,6 +298,20 @@
 	}
 }
 
+- (NSString *)getDeviceModel {
+	// 获取设备型号（iPhone、iPad等）
+	NSString *model = [[UIDevice currentDevice] model];
+	NSLog(@"[Godot3ASA] Device model: %@", model);
+	return model;
+}
+
+- (NSString *)getSystemVersion {
+	// 获取系统版本号（如16.3）
+	NSString *version = [[UIDevice currentDevice] systemVersion];
+	NSLog(@"[Godot3ASA] System version: %@", version);
+	return version;
+}
+
 @end
 
 // MARK: - Static Delegate Instance
@@ -314,6 +330,8 @@ void Godot3ASA::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("requestAttributionData", "token"), &Godot3ASA::requestAttributionData);
 	ClassDB::bind_method(D_METHOD("performAttribution"), &Godot3ASA::performAttribution);
 	ClassDB::bind_method(D_METHOD("isSupported"), &Godot3ASA::isSupported);
+	ClassDB::bind_method(D_METHOD("getDeviceModel"), &Godot3ASA::getDeviceModel);
+	ClassDB::bind_method(D_METHOD("getSystemVersion"), &Godot3ASA::getSystemVersion);
 
 	// 信号定义
 	ADD_SIGNAL(MethodInfo("onASATokenReceived",
@@ -356,6 +374,22 @@ bool Godot3ASA::isSupported() {
 		asa_delegate = [[GodotASADelegate alloc] init];
 	}
 	return [asa_delegate isAdServicesSupported];
+}
+
+String Godot3ASA::getDeviceModel() {
+	if (!asa_delegate) {
+		asa_delegate = [[GodotASADelegate alloc] init];
+	}
+	NSString *model = [asa_delegate getDeviceModel];
+	return String::utf8([model UTF8String]);
+}
+
+String Godot3ASA::getSystemVersion() {
+	if (!asa_delegate) {
+		asa_delegate = [[GodotASADelegate alloc] init];
+	}
+	NSString *version = [asa_delegate getSystemVersion];
+	return String::utf8([version UTF8String]);
 }
 
 Godot3ASA::Godot3ASA() {

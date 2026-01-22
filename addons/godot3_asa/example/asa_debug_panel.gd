@@ -11,10 +11,13 @@ extends Node
 
 var ui_panel: Panel
 var token_label: Label
-var attribution_label: RichTextLabel
+var attribution_label: TextEdit
 var copy_token_btn: Button
 var copy_attr_btn: Button
 var copy_all_btn: Button
+var test_attribution_btn: Button
+var fill_mock_btn: Button
+var test_report_btn: Button
 
 # 数据缓存
 var cached_token: String = ""
@@ -39,15 +42,15 @@ func _ready():
 	call_deferred("_create_debug_ui")
 	
 	if is_editor:
-		# 编辑器模式：填充伪数据用于预览布局
-		print("[ASA Debug] Running in editor mode with mock data")
-		call_deferred("_fill_mock_data")
+		# 编辑器模式：显示测试提示，不自动填充数据
+		print("[ASA Debug] Running in editor mode - click Test Attribution to see mock data")
+		call_deferred("_setup_editor_mode")
 	else:
 		# 真实运行模式：确保ASA已加载后再连接信号
 		call_deferred("_connect_to_asa")
 
 func _connect_to_asa():
-	"""延迟连接到ASA autoload，确保ASA已初始化且UI已创建"""
+	"""检查ASA autoload是否可用（不连接信号）"""
 	# 检查ASA是否存在
 	if not has_node("/root/ASA"):
 		print("[ASA Debug] ERROR: ASA autoload not found")
@@ -67,32 +70,33 @@ func _connect_to_asa():
 		return
 	
 	var _is_supported = asa_node.is_supported()
-	print("[ASA Debug] Running on iOS device, checking ASA support: %s" % _is_supported)
+	print("[ASA Debug] Running on iOS device, ASA support: %s" % _is_supported)
 	
 	if not _is_supported:
 		print("[ASA Debug] ERROR: ASA not supported on this device")
 		_show_error("AdServices not supported (requires iOS 14.3+)")
 		return
 	
-	# 连接信号（防止重复连接）
-	print("[ASA Debug] ASA supported, connecting signals")
-	if not asa_node.is_connected("onASATokenReceived", self, "_on_token_received"):
-		var err = asa_node.connect("onASATokenReceived", self, "_on_token_received")
-		if err != OK:
-			print("[ASA Debug] ERROR: Failed to connect onASATokenReceived: ", err)
-		else:
-			print("[ASA Debug] Connected to onASATokenReceived")
-	else:
-		print("[ASA Debug] WARNING: onASATokenReceived already connected")
+	# 显示测试提示
+	print("[ASA Debug] Ready for testing. Click 'Test Attribution' button to start.")
+	if is_instance_valid(token_label):
+		token_label.text = "Click 'Test Attribution' button below to start"
+		token_label.add_color_override("font_color", Color(0.5, 0.8, 1.0, 1.0))
+	if is_instance_valid(attribution_label):
+		attribution_label.text = "Click the Test Attribution button to fetch ASA data"
+
+func _setup_editor_mode():
+	"""编辑器模式初始化：显示测试提示"""
+	yield(get_tree(), "idle_frame")
 	
-	if not asa_node.is_connected("onASAAttributionReceived", self, "_on_attribution_received"):
-		var err = asa_node.connect("onASAAttributionReceived", self, "_on_attribution_received")
-		if err != OK:
-			print("[ASA Debug] ERROR: Failed to connect onASAAttributionReceived: ", err)
-		else:
-			print("[ASA Debug] Connected to onASAAttributionReceived")
-	else:
-		print("[ASA Debug] WARNING: onASAAttributionReceived already connected")
+	if is_instance_valid(token_label):
+		token_label.text = "[Editor Mode] Click 'Test Attribution' to see mock data OR 'Fill Mock Data' to load immediately"
+		token_label.add_color_override("font_color", Color(0.5, 0.8, 1.0, 1.0))
+	
+	if is_instance_valid(attribution_label):
+		attribution_label.text = "[Editor Mode] Click Test Attribution button to simulate ASA request or Fill Mock Data to load instantly"
+	
+	print("[ASA Debug] Editor mode ready - mock data will simulate network delay")
 
 # ============================================================================
 # UI 创建
@@ -138,7 +142,7 @@ func _create_debug_ui():
 	
 	# 标题
 	var title = Label.new()
-	title.text = "🔍 ASA Attribution Debug Panel"
+	title.text = "ASA Attribution Debug Panel"
 	title.align = Label.ALIGN_CENTER
 	title.add_font_override("font", _create_font(18, true))
 	title.add_color_override("font_color", Color(0.8, 0.9, 1.0, 1.0))
@@ -153,23 +157,42 @@ func _create_debug_ui():
 	vbox.add_child(token_container)
 	
 	var token_title = Label.new()
-	token_title.text = "📝 Attribution Token"
+	token_title.text = "Attribution Token"
 	token_title.add_font_override("font", _create_font(14, true))
 	token_title.add_color_override("font_color", Color(1.0, 0.9, 0.6, 1.0))
 	token_container.add_child(token_title)
 	
 	token_label = Label.new()
-	token_label.text = "⏳ Waiting for token..."
+	token_label.text = "Waiting for token..."
 	token_label.autowrap = true
 	token_label.add_color_override("font_color", Color(0.7, 0.7, 0.7, 1.0))
 	token_container.add_child(token_label)
 	
 	# Token 复制按钮
 	copy_token_btn = Button.new()
-	copy_token_btn.text = "📋 Copy Token"
+	copy_token_btn.text = "Copy Token"
 	copy_token_btn.disabled = true
 	copy_token_btn.connect("pressed", self, "_on_copy_token_pressed")
 	token_container.add_child(copy_token_btn)
+	
+	# 按钮容器
+	var btn_row = HBoxContainer.new()
+	btn_row.add_constant_override("separation", 5)
+	token_container.add_child(btn_row)
+	
+	# 测试归因按钮
+	test_attribution_btn = Button.new()
+	test_attribution_btn.text = "Test Attribution"
+	test_attribution_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	test_attribution_btn.connect("pressed", self, "_on_test_attribution_pressed")
+	btn_row.add_child(test_attribution_btn)
+	
+	# 填充Mock数据按钮
+	fill_mock_btn = Button.new()
+	fill_mock_btn.text = "Fill Mock Data"
+	fill_mock_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	fill_mock_btn.connect("pressed", self, "_on_fill_mock_pressed")
+	btn_row.add_child(fill_mock_btn)
 	
 	# 添加分隔线
 	vbox.add_child(_create_separator())
@@ -181,30 +204,31 @@ func _create_debug_ui():
 	vbox.add_child(attr_container)
 	
 	var attr_title = Label.new()
-	attr_title.text = "📊 Attribution Data"
+	attr_title.text = "Attribution Data"
 	attr_title.add_font_override("font", _create_font(14, true))
 	attr_title.add_color_override("font_color", Color(1.0, 0.9, 0.6, 1.0))
 	attr_container.add_child(attr_title)
 	
-	attribution_label = RichTextLabel.new()
-	attribution_label.bbcode_enabled = true
-	attribution_label.scroll_following = true
+	attribution_label = TextEdit.new()
+	attribution_label.readonly = true
+	attribution_label.wrap_enabled = true
 	attribution_label.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	attribution_label.bbcode_text = "[color=#aaaaaa]⏳ Waiting for attribution data...[/color]"
+	attribution_label.text = "Waiting for attribution data..."
 	
 	# 添加背景
-	var rtl_style = StyleBoxFlat.new()
-	rtl_style.bg_color = Color(0.05, 0.05, 0.05, 0.8)
-	rtl_style.border_color = Color(0.2, 0.2, 0.2, 1.0)
-	rtl_style.border_width_left = 1
-	rtl_style.border_width_right = 1
-	rtl_style.border_width_top = 1
-	rtl_style.border_width_bottom = 1
-	rtl_style.corner_radius_top_left = 4
-	rtl_style.corner_radius_top_right = 4
-	rtl_style.corner_radius_bottom_left = 4
-	rtl_style.corner_radius_bottom_right = 4
-	attribution_label.add_stylebox_override("normal", rtl_style)
+	var te_style = StyleBoxFlat.new()
+	te_style.bg_color = Color(0.05, 0.05, 0.05, 0.8)
+	te_style.border_color = Color(0.2, 0.2, 0.2, 1.0)
+	te_style.border_width_left = 1
+	te_style.border_width_right = 1
+	te_style.border_width_top = 1
+	te_style.border_width_bottom = 1
+	te_style.corner_radius_top_left = 4
+	te_style.corner_radius_top_right = 4
+	te_style.corner_radius_bottom_left = 4
+	te_style.corner_radius_bottom_right = 4
+	attribution_label.add_stylebox_override("normal", te_style)
+	attribution_label.add_color_override("font_color", Color(0.9, 0.9, 0.9, 1.0))
 	
 	attr_container.add_child(attribution_label)
 	
@@ -214,18 +238,26 @@ func _create_debug_ui():
 	attr_container.add_child(btn_container)
 	
 	copy_attr_btn = Button.new()
-	copy_attr_btn.text = "📋 Copy Attribution JSON"
+	copy_attr_btn.text = "Copy Attribution JSON"
 	copy_attr_btn.disabled = true
 	copy_attr_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	copy_attr_btn.connect("pressed", self, "_on_copy_attribution_pressed")
 	btn_container.add_child(copy_attr_btn)
 	
 	copy_all_btn = Button.new()
-	copy_all_btn.text = "📋 Copy All Data"
+	copy_all_btn.text = "Copy All Data"
 	copy_all_btn.disabled = true
 	copy_all_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	copy_all_btn.connect("pressed", self, "_on_copy_all_pressed")
 	btn_container.add_child(copy_all_btn)
+	
+	# 测试上报按钮
+	test_report_btn = Button.new()
+	test_report_btn.text = "Test Report (Activation)"
+	test_report_btn.disabled = true
+	test_report_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	test_report_btn.connect("pressed", self, "_on_test_report_pressed")
+	btn_container.add_child(test_report_btn)
 	
 	print("[ASA Debug] Debug panel created")
 
@@ -264,29 +296,33 @@ func _on_token_received(token: String, error_code: int, error_message: String):
 	if error_code == 0 and not token.empty():
 		cached_token = token
 		var display_token = token.substr(0, 120) + ("..." if token.length() > 120 else "")
-		token_label.text = "✅ " + display_token
+		token_label.text = "[SUCCESS] " + display_token
 		token_label.add_color_override("font_color", Color(0.4, 1.0, 0.4, 1.0))
 		copy_token_btn.disabled = false
 		print("[ASA Debug] Token received: ", token.substr(0, 50), "... (length: ", token.length(), ")")
 	else:
 		cached_token = ""
-		var error_text = "❌ Error (code %d): %s" % [error_code, error_message]
+		var error_text = "[ERROR] (code %d): %s" % [error_code, error_message]
 		token_label.text = error_text
 		token_label.add_color_override("font_color", Color(1.0, 0.3, 0.3, 1.0))
 		copy_token_btn.disabled = true
 		print("[ASA Debug] Token failed: ", error_text)
+	
+	# 重新启用测试按钮
+	if is_instance_valid(test_attribution_btn):
+		test_attribution_btn.disabled = false
 
-func _on_attribution_received(data: String, code: int, message: String):
+func _on_attribution_received(attribution_data: String, error_code: int, error_message: String):
 	# 归因数据接收回调
-	print("[ASA Debug] Attribution callback: code=", code)
+	print("[ASA Debug] Attribution callback: code=", error_code)
 	
 	# 检查UI节点是否有效
 	if not is_instance_valid(attribution_label) or not is_instance_valid(copy_attr_btn) or not is_instance_valid(copy_all_btn):
 		print("[ASA Debug] ERROR: UI nodes not ready for attribution callback")
 		return
 	
-	if code == 200 and not data.empty():
-		var json = JSON.parse(data)
+	if error_code == 200 and not attribution_data.empty():
+		var json = JSON.parse(attribution_data)
 		if json.error == OK:
 			var attr = json.result
 			cached_attribution = attr
@@ -300,60 +336,68 @@ func _on_attribution_received(data: String, code: int, message: String):
 			print("[ASA Debug] Failed to parse attribution data")
 	else:
 		cached_attribution = {}
-		_show_attribution_error("[Code: %d] %s" % [code, message if message else "Request failed"])
-		print("[ASA Debug] Attribution failed: ", message)
+		_show_attribution_error("[Code: %d] %s" % [error_code, error_message if error_message else "Request failed"])
+		print("[ASA Debug] Attribution failed: ", error_message)
+	
+	# 重新启用测试按钮
+	if is_instance_valid(test_attribution_btn):
+		test_attribution_btn.disabled = false
 
 func _show_attribution_error(error_text: String):
 	# 在归因区域显示错误信息
 	if attribution_label:
-		attribution_label.bbcode_text = "[color=#ff5555]❌ %s[/color]" % error_text
+		attribution_label.text = "[ERROR] " + error_text
 	if copy_attr_btn:
 		copy_attr_btn.disabled = true
 	if copy_all_btn:
 		copy_all_btn.disabled = true
+	if test_report_btn:
+		test_report_btn.disabled = true
 
 func _show_error(error_text: String):
 	# 显示通用错误（例如 ASA autoload 未找到）
 	if token_label:
-		token_label.text = "❌ " + error_text
+		token_label.text = "[ERROR] " + error_text
 		token_label.add_color_override("font_color", Color(1.0, 0.3, 0.3, 1.0))
 	if attribution_label:
-		attribution_label.bbcode_text = "[color=#ff5555]❌ %s[/color]" % error_text
+		attribution_label.text = "[ERROR] " + error_text
 
 func _update_attribution_ui(attr: Dictionary):
 	# 更新 UI 显示归因数据
 	var is_asa = attr.get("attribution", false)
-	var status_color = "#55ff55" if is_asa else "#ffff55"
-	var status_icon = "✅" if is_asa else "⚠️"
-	var status_text = "From ASA" if is_asa else "Not from ASA"
+	var status_text = "[SUCCESS] From ASA" if is_asa else "[INFO] Not from ASA"
 	
-	var text = "[color=%s]%s %s[/color]\n\n" % [status_color, status_icon, status_text]
+	var text = status_text + "\n\n"
 	
 	if is_asa:
 		# 显示详细归因数据
-		text += "[b][color=#88ccff]Campaign ID:[/color][/b] %s\n" % _format_value(attr.get("campaignId"))
-		text += "[b][color=#88ccff]Ad Group ID:[/color][/b] %s\n" % _format_value(attr.get("adGroupId"))
-		text += "[b][color=#88ccff]Keyword ID:[/color][/b] %s\n" % _format_value(attr.get("keywordId"))
-		text += "[b][color=#88ccff]Creative Set ID:[/color][/b] %s\n" % _format_value(attr.get("adId"))
-		text += "[b][color=#88ccff]Org ID:[/color][/b] %s\n" % _format_value(attr.get("orgId"))
-		text += "[b][color=#88ccff]Country/Region:[/color][/b] %s\n" % _format_value(attr.get("countryOrRegion"))
-		text += "[b][color=#88ccff]Conversion Type:[/color][/b] %s\n" % _format_value(attr.get("conversionType"))
-		text += "[b][color=#88ccff]Click Date:[/color][/b] %s\n" % _format_value(attr.get("clickDate"))
+		text += "Campaign ID: %s\n" % _format_value(attr.get("campaignId"))
+		text += "Ad Group ID: %s\n" % _format_value(attr.get("adGroupId"))
+		text += "Keyword ID: %s\n" % _format_value(attr.get("keywordId"))
+		text += "Creative Set ID: %s\n" % _format_value(attr.get("adId"))
+		text += "Org ID: %s\n" % _format_value(attr.get("orgId"))
+		text += "Country/Region: %s\n" % _format_value(attr.get("countryOrRegion"))
+		text += "Conversion Type: %s\n" % _format_value(attr.get("conversionType"))
+		text += "Click Date: %s\n" % _format_value(attr.get("clickDate"))
 		
 		# 显示原始 JSON（方便调试）
-		text += "\n[color=#666666]──────────────────────────[/color]\n"
-		text += "[color=#999999][b]Raw JSON:[/b][/color]\n"
-		text += "[color=#aaaaaa]%s[/color]" % JSON.print(attr, "  ")
+		text += "\n----------------------------------------\n"
+		text += "Raw JSON:\n"
+		text += JSON.print(attr, "  ")
 	else:
-		text += "\n[color=#999999]User did not click any ASA ad in the last 30 days.[/color]"
+		text += "\nUser did not click any ASA ad in the last 30 days."
 	
-	attribution_label.bbcode_text = text
+	attribution_label.text = text
+	
+	# 启用测试上报按钮
+	if is_instance_valid(test_report_btn):
+		test_report_btn.disabled = false
 
 func _format_value(value) -> String:
 	# 格式化值显示
 	if value == null or (typeof(value) == TYPE_STRING and value.empty()):
-		return "[color=#666666]N/A[/color]"
-	return "[color=#ffffff]%s[/color]" % str(value)
+		return "N/A"
+	return str(value)
 
 # ============================================================================
 # 复制功能
@@ -404,10 +448,76 @@ func _on_copy_all_pressed():
 	_show_copy_feedback("All data copied!")
 	print("[ASA Debug] All debug data copied to clipboard")
 
+func _on_test_attribution_pressed():
+	# 强制触发归因测试
+	var is_editor = OS.has_feature("editor")
+	
+	if is_editor:
+		# 编辑器模式：模拟网络请求
+		print("[ASA Debug] Editor mode: simulating attribution with network delay...")
+		_simulate_mock_attribution()
+		return
+	
+	# 真实 iOS 设备模式
+	if not has_node("/root/ASA"):
+		print("[ASA Debug] ERROR: ASA autoload not found")
+		_show_error("ASA autoload not found")
+		return
+	
+	var asa_node = get_node("/root/ASA")
+	if not asa_node:
+		print("[ASA Debug] ERROR: ASA node is null")
+		_show_error("ASA node is null")
+		return
+	
+	# 连接信号（防止重复连接）
+	if not asa_node.is_connected("onASATokenReceived", self, "_on_token_received"):
+		var err = asa_node.connect("onASATokenReceived", self, "_on_token_received")
+		if err != OK:
+			print("[ASA Debug] ERROR: Failed to connect onASATokenReceived: ", err)
+			return
+		print("[ASA Debug] Connected to onASATokenReceived signal")
+	
+	if not asa_node.is_connected("onASAAttributionReceived", self, "_on_attribution_received"):
+		var err = asa_node.connect("onASAAttributionReceived", self, "_on_attribution_received")
+		if err != OK:
+			print("[ASA Debug] ERROR: Failed to connect onASAAttributionReceived: ", err)
+			return
+		print("[ASA Debug] Connected to onASAAttributionReceived signal")
+	
+	# 重置UI状态
+	if is_instance_valid(token_label):
+		token_label.text = "Requesting attribution token..."
+		token_label.add_color_override("font_color", Color(0.7, 0.7, 0.7, 1.0))
+	if is_instance_valid(attribution_label):
+		attribution_label.text = "Waiting for attribution data..."
+	if is_instance_valid(copy_token_btn):
+		copy_token_btn.disabled = true
+	if is_instance_valid(copy_attr_btn):
+		copy_attr_btn.disabled = true
+	if is_instance_valid(copy_all_btn):
+		copy_all_btn.disabled = true
+	if is_instance_valid(test_attribution_btn):
+		test_attribution_btn.disabled = true
+	if is_instance_valid(test_report_btn):
+		test_report_btn.disabled = true
+	
+	# 清空缓存
+	cached_token = ""
+	cached_attribution = {}
+	
+	print("[ASA Debug] Forcing attribution test...")
+	asa_node.perform_attribution()
+	
+	# 10秒后重新启用按钮（防止卡死）
+	yield(get_tree().create_timer(10.0), "timeout")
+	if is_instance_valid(test_attribution_btn):
+		test_attribution_btn.disabled = false
+
 func _show_copy_feedback(message: String):
 	# 显示复制反馈（临时修改按钮文本）
 	var original_text = copy_all_btn.text
-	copy_all_btn.text = "✅ " + message
+	copy_all_btn.text = message
 	
 	# 2 秒后恢复
 	yield(get_tree().create_timer(2.0), "timeout")
@@ -415,22 +525,58 @@ func _show_copy_feedback(message: String):
 		copy_all_btn.text = original_text
 
 # ============================================================================
-# 编辑器预览模式
+# 编辑器模拟模式
 # ============================================================================
 
-func _fill_mock_data():
-	# 在编辑器中填充伪数据用于预览布局
-	# 等待 UI 创建完成
-	yield(get_tree(), "idle_frame")
+func _simulate_mock_attribution():
+	"""在编辑器中模拟 ASA 归因请求，带有随机网络延迟"""
+	# 重置UI状态
+	if is_instance_valid(token_label):
+		token_label.text = "[Mock] Requesting token from AdServices..."
+		token_label.add_color_override("font_color", Color(0.7, 0.7, 0.7, 1.0))
+	if is_instance_valid(attribution_label):
+		attribution_label.text = "[Mock] Waiting for server response..."
+	if is_instance_valid(copy_token_btn):
+		copy_token_btn.disabled = true
+	if is_instance_valid(copy_attr_btn):
+		copy_attr_btn.disabled = true
+	if is_instance_valid(copy_all_btn):
+		copy_all_btn.disabled = true
+	if is_instance_valid(test_attribution_btn):
+		test_attribution_btn.disabled = true
+	if is_instance_valid(test_report_btn):
+		test_report_btn.disabled = true
+	
+	# 清空缓存
+	cached_token = ""
+	cached_attribution = {}
+	
+	print("[ASA Debug] [Mock] Simulating token request...")
+	
+	# 模拟 Token 请求延迟 (0.5-1.5秒)
+	var token_delay = rand_range(0.5, 1.5)
+	yield(get_tree().create_timer(token_delay), "timeout")
 	
 	# 模拟 Token 数据
 	var mock_token = "eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6IjEyMzQ1Njc4OTAifQ.eyJhdWQiOiJodHRwczovL2FwaS1hZHNlcnZpY2VzLmFwcGxlLmNvbS9hcGkvdjEiLCJleHAiOjE3MDk5MDAwMDAsImlhdCI6MTcwOTgxMzYwMCwiaXNzIjoiYXBwbGUtYWRzZXJ2aWNlcy1hdHRyaWJ1dGlvbiIsImp0aSI6IjEyMzQ1Njc4LTkwYWItY2RlZi0xMjM0LTU2Nzg5MGFiY2RlZiIsInN1YiI6ImNvbS5leGFtcGxlLmFwcCJ9.dGhpc19pc19hX21vY2tfc2lnbmF0dXJlX2Zvcl9wcmV2aWV3X3B1cnBvc2VzX29ubHk"
 	cached_token = mock_token
 	
-	var display_token = mock_token.substr(0, 120) + "..."
-	token_label.text = "✅ " + display_token
-	token_label.add_color_override("font_color", Color(0.4, 1.0, 0.4, 1.0))
-	copy_token_btn.disabled = false
+	if is_instance_valid(token_label):
+		var display_token = mock_token.substr(0, 120) + "..."
+		token_label.text = "[SUCCESS] [Mock] " + display_token
+		token_label.add_color_override("font_color", Color(0.4, 1.0, 0.4, 1.0))
+	if is_instance_valid(copy_token_btn):
+		copy_token_btn.disabled = false
+	
+	print("[ASA Debug] [Mock] Token received (%.2fs delay)" % token_delay)
+	
+	# 更新归因状态
+	if is_instance_valid(attribution_label):
+		attribution_label.text = "[Mock] Fetching attribution data from Apple server..."
+	
+	# 模拟归因请求延迟 (1.0-3.0秒)
+	var attr_delay = rand_range(1.0, 3.0)
+	yield(get_tree().create_timer(attr_delay), "timeout")
 	
 	# 模拟归因数据
 	var mock_attribution = {
@@ -446,11 +592,150 @@ func _fill_mock_data():
 	}
 	cached_attribution = mock_attribution
 	
-	_update_attribution_ui(mock_attribution)
-	copy_attr_btn.disabled = false
-	copy_all_btn.disabled = false
+	if is_instance_valid(attribution_label):
+		_update_attribution_ui(mock_attribution)
+	if is_instance_valid(copy_attr_btn):
+		copy_attr_btn.disabled = false
+	if is_instance_valid(copy_all_btn):
+		copy_all_btn.disabled = false
 	
-	print("[ASA Debug] Mock data filled for editor preview")
+	print("[ASA Debug] [Mock] Attribution received (%.2fs delay)" % attr_delay)
+	print("[ASA Debug] [Mock] Total time: %.2fs" % (token_delay + attr_delay))
+	
+	# 重新启用测试按钮
+	if is_instance_valid(test_attribution_btn):
+		test_attribution_btn.disabled = false
+
+# ============================================================================
+# 填充Mock数据（立即加载）
+# ============================================================================
+
+func _on_fill_mock_pressed():
+	"""立即填充Mock数据，无延迟"""
+	print("[ASA Debug] Filling mock data immediately...")
+	
+	# 禁用按钮防止重复点击
+	if is_instance_valid(fill_mock_btn):
+		fill_mock_btn.disabled = true
+	if is_instance_valid(test_attribution_btn):
+		test_attribution_btn.disabled = true
+	
+	# 生成 Token
+	var mock_token = "eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6IjEyMzQ1Njc4OTAifQ.eyJhdWQiOiJodHRwczovL2FwaS1hZHNlcnZpY2VzLmFwcGxlLmNvbS9hcGkvdjEiLCJleHAiOjE3MDk5MDAwMDAsImlhdCI6MTcwOTgxMzYwMCwiaXNzIjoiYXBwbGUtYWRzZXJ2aWNlcy1hdHRyaWJ1dGlvbiIsImp0aSI6IjEyMzQ1Njc4LTkwYWItY2RlZi0xMjM0LTU2Nzg5MGFiY2RlZiIsInN1YiI6ImNvbS5leGFtcGxlLmFwcCJ9.dGhpc19pc19hX21vY2tfc2lnbmF0dXJlX2Zvcl9wcmV2aWV3X3B1cnBvc2VzX29ubHk"
+	cached_token = mock_token
+	
+	if is_instance_valid(token_label):
+		var display_token = mock_token.substr(0, 120) + "..."
+		token_label.text = "[SUCCESS] [Mock] " + display_token
+		token_label.add_color_override("font_color", Color(0.4, 1.0, 0.4, 1.0))
+	if is_instance_valid(copy_token_btn):
+		copy_token_btn.disabled = false
+	
+	print("[ASA Debug] [Mock] Token filled")
+	
+	# 生成归因数据
+	var mock_attribution = {
+		"attribution": true,
+		"orgId": 40669820,
+		"campaignId": 542370539,
+		"adGroupId": 542317095,
+		"keywordId": 87675432,
+		"adId": 542317136,
+		"countryOrRegion": "US",
+		"conversionType": "Download",
+		"clickDate": "2026-01-20T08:30:15Z"
+	}
+	cached_attribution = mock_attribution
+	
+	if is_instance_valid(attribution_label):
+		_update_attribution_ui(mock_attribution)
+	if is_instance_valid(copy_attr_btn):
+		copy_attr_btn.disabled = false
+	if is_instance_valid(copy_all_btn):
+		copy_all_btn.disabled = false
+	
+	print("[ASA Debug] [Mock] Attribution filled")
+	
+	# 重新启用按钮
+	if is_instance_valid(fill_mock_btn):
+		fill_mock_btn.disabled = false
+	if is_instance_valid(test_attribution_btn):
+		test_attribution_btn.disabled = false
+
+func _on_test_report_pressed():
+	"""测试上报激活事件（独立测试，不影响ASA正常状态）"""
+	print("[ASA Debug] Testing activation report (independent test)...")
+	
+	# 检查是否有归因数据
+	if cached_attribution.empty():
+		print("[ASA Debug] ERROR: No attribution data available for reporting")
+		_show_attribution_error("No attribution data - cannot report")
+		return
+	
+	# 检查是否来自ASA
+	var is_from_asa = cached_attribution.get("attribution", false)
+	if not is_from_asa:
+		print("[ASA Debug] INFO: User not from ASA, but forcing report for testing...")
+		if is_instance_valid(attribution_label):
+			var current_text = attribution_label.text
+			attribution_label.text = current_text + "\n\n[INFO] Not from ASA but forcing test report..."
+	
+	# 检查ASA是否可用
+	if not has_node("/root/ASA"):
+		print("[ASA Debug] ERROR: ASA autoload not found")
+		_show_attribution_error("ASA autoload not found - cannot report")
+		return
+	
+	var asa_node = get_node("/root/ASA")
+	if not asa_node:
+		print("[ASA Debug] ERROR: ASA node is null")
+		_show_attribution_error("ASA node is null - cannot report")
+		return
+	
+	# 检查是否设置了from_key
+	if asa_node.appsa_from_key.empty():
+		print("[ASA Debug] ERROR: AppSA from_key not set")
+		_show_attribution_error("AppSA from_key not set - call ASA.set_appsa_from_key() first")
+		return
+	
+	print("[ASA Debug] Sending test activation report with cached attribution data...")
+	print("[ASA Debug] Campaign ID: ", cached_attribution.get("campaignId", "N/A"))
+	print("[ASA Debug] Ad Group ID: ", cached_attribution.get("adGroupId", "N/A"))
+	
+	# 独立构造上报数据，不影响ASA的attribution_data
+	# 使用ASA节点的设备信息获取方法（统一处理，支持C++层精确获取）
+	var device_info = asa_node._get_device_info()
+	var app_name = ""
+	if ProjectSettings.has_setting("application/config/name"):
+		app_name = ProjectSettings.get_setting("application/config/name")
+	
+	var report_data = {
+		"install_time": str(OS.get_unix_time() * 1000),
+		"device_model": device_info.model,
+		"os_version": device_info.os_version,
+		"app_name": app_name,
+		"attribution": cached_attribution.get("attribution", false),
+		"org_id": str(cached_attribution.get("orgId", "")),
+		"campaign_id": str(cached_attribution.get("campaignId", "")),
+		"adgroup_id": str(cached_attribution.get("adGroupId", "")),
+		"keyword_id": str(cached_attribution.get("keywordId", "")),
+		"creativeset_id": str(cached_attribution.get("adId", "")),
+		"conversion_type": cached_attribution.get("conversionType", ""),
+		"country_or_region": cached_attribution.get("countryOrRegion", ""),
+		"click_date": cached_attribution.get("clickDate", ""),
+		"source_from": "ads",
+		"claim_type": cached_attribution.get("claimType", "Click")
+	}
+	
+	# 直接调用ASA的发送方法（使用独立数据）
+	asa_node._send_appsa_request(asa_node.APPSA_ACTIVATION_URL, report_data, "test_activation")
+	
+	# 更新UI显示
+	if is_instance_valid(attribution_label):
+		var current_text = attribution_label.text
+		attribution_label.text = current_text + "\n\n[INFO] Test activation report sent (check logs for result)"
+	
+	print("[ASA Debug] Test activation report sent - check ASA logs for result")
 
 # ============================================================================
 # 清理

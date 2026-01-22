@@ -129,13 +129,13 @@ func start_attribution():
 	retry_count = 0
 	ASA.perform_attribution()
 
-func _on_attribution_received(data: String, code: int, message: String):
+func _on_attribution_received(attribution_data: String, error_code: int, error_message: String):
 	# 归因数据接收完成
-	print(LOG_PREFIX, " Attribution callback: code=", code)
+	print(LOG_PREFIX, " Attribution callback: code=", error_code)
 	
-	if code == 200:
+	if error_code == 200:
 		# 归因成功
-		var json = JSON.parse(data)
+		var json = JSON.parse(attribution_data)
 		if json.error == OK:
 			var attr = json.result
 			
@@ -165,11 +165,11 @@ func _on_attribution_received(data: String, code: int, message: String):
 				ASA.report_activation()
 		else:
 			print(LOG_PREFIX, " Failed to parse attribution data")
-			_retry_attribution_if_needed(code)
+			_retry_attribution_if_needed(error_code)
 	else:
 		# 归因失败
-		print(LOG_PREFIX, " Attribution failed: ", message)
-		_retry_attribution_if_needed(code)
+		print(LOG_PREFIX, " Attribution failed: ", error_message)
+		_retry_attribution_if_needed(error_code)
 
 func _retry_attribution_if_needed(code: int):
 	# 检查是否需要重试

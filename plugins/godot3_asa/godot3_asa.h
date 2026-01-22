@@ -76,6 +76,18 @@ public:
 	 */
 	bool isSupported();
 
+	/**
+	 * 获取设备型号（如"iPhone"、"iPad"）
+	 * @return 设备型号字符串
+	 */
+	String getDeviceModel();
+
+	/**
+	 * 获取iOS系统版本号（如"16.3"）
+	 * @return 系统版本字符串
+	 */
+	String getSystemVersion();
+
 	static Godot3ASA *get_singleton();
 
 	Godot3ASA();
