@@ -1,40 +1,129 @@
-# Godot3 TapTap iOS Plugin - AI Coding Guidelines
+# Godot 3.x iOS Plugins - AI Coding Guidelines
 
 ## Project Overview
-This is a **TapTap SDK integration plugin for Godot 3.x on iOS**. It wraps TapTap's login, compliance (anti-addiction), license verification, and DLC APIs as a Godot singleton accessible from GDScript. The plugin follows the official Godot iOS plugin architecture pattern.
+This repository contains **two iOS plugins for Godot 3.x**, both following the official Godot iOS plugin architecture pattern:
 
-**Cross-Platform Integration:** This iOS plugin shares the same `addons/godot3-taptap/` GDScript layer with the [Android version](https://github.com/GropingChour/godot3_taptap_android_plugin), ensuring unified API across platforms.
+### 1. Godot3 TapTap Plugin (`godot3_taptap`)
+Wraps TapTap SDK (login, compliance, license verification, DLC) as a Godot singleton.
+- **Cross-Platform**: Shares GDScript layer (`addons/godot3_taptap/`) with [Android version](https://github.com/GropingChour/godot3_taptap_android_plugin)
+- **TapTap SDKs**: Bundles ~12 XCFrameworks in `plugins/godot3_taptap/sdk/`
+- **Token Encryption**: XOR encryption via iOS Info.plist (key: `TapTapDecryptKey`)
+- **Limitations**: iOS lacks license/DLC/IAP SDKs (Android-only)
 
-**Key Differences from Official Plugins:** 
-- Bundles pre-built TapTap SDK XCFrameworks in `plugins/godot3_taptap/sdk/` (~12 frameworks)
-- Implements token encryption via iOS Info.plist (vs Android's string.xml resources)
+### 2. Godot3 ASA Plugin (`godot3_asa`)
+Apple Search Ads attribution using AdServices framework (iOS 14.3+).
+- **Client-Side Attribution**: No backend required, direct AdServices API calls
+- **AppSA Integration**: Reports attribution data to 七麦 (QiMai) analytics platform
+- **Signal-Based API**: Async token/attribution via GDScript signals (`onASATokenReceived`, `onASAAttributionReceived`)
+- **Pending Queue**: Buffers events during attribution to prevent data loss
+- **Debug Panel**: `addons/godot3_asa/example/asa_debug_panel.gd` - visual attribution debugger with mock editor preview
 
 ## Architecture Pattern (Critical for .mm Files)
 
 ### Dual-Layer Structure (C++ + Objective-C)
-Plugins MUST use both layers - C++ wrapper + ObjC delegate classes:
+**Both plugins** follow this mandatory pattern - C++ singleton + ObjC delegate:
 
 ```
-GDScript (taptap.gd) → Godot3TapTap (C++ singleton) → GodotTapTapDelegate (@interface) → TapTap SDK (Objective-C)
-                ↓                                      ↓
-           _post_event() ← async callbacks ← completion handlers
-                ↓
-         pending_events queue → GDScript polls via pop_pending_event()
+GDScript (autoload) → C++ Singleton → ObjC Delegate → iOS SDK
+    ↓                     ↓                 ↓
+  Signals ← _post_event/emit_signal ← completion handlers
 ```
 
-**Reference:** Compare `plugins/godot3taptap/godot3taptap.mm` with [official in_app_store.mm](https://github.com/godot-sdk-integrations/godot-ios-plugins/blob/master/plugins/inappstore/in_app_store.mm). Both use `@interface/@implementation` for iOS SDK callbacks.
+**Examples:**
+- **TapTap**: `taptap.gd` → `Godot3TapTap` → `GodotTapTapDelegate` → TapTap SDK
+- **ASA**: `asa.gd` (autoload `ASA`) → `Godot3ASA` → `GodotASADelegate` → AdServices API
 
-### File Structure Requirements
-Each plugin needs:
-- `<plugin>.h` - C++ class declaration (inherits `Object`, declares singleton)
-- `<plugin>.mm` - **Objective-C++ implementation** with:
-  - `@interface <Plugin>Delegate` for SDK callbacks
-  - C++ methods calling ObjC delegate
-  - Event posting via `_post_event(Dictionary)`
-- `<plugin>_module.{h,cpp}` - Registration (`register_<plugin>_types()` calls `memnew()` and `Engine::add_singleton()`)
-- `<plugin>.gdip` - Godot plugin manifest (lists binary, embedded frameworks, initialization functions)
+**Reference:** Compare with [official in_app_store.mm](https://github.com/godot-sdk-integrations/godot-ios-plugins/blob/master/plugins/inappstore/in_app_store.mm).
 
-## API Consistency with Android Version
+### File Structure Requirements (Per Plugin)
+```
+plugins/<plugin>/
+├── <plugin>.h          # C++ class (inherits Object, declares singleton)
+├── <plugin>.mm         # ObjC++ implementation
+│   ├── @interface <Plugin>Delegate (@implementation)
+│   └── C++ methods calling ObjC delegate
+├── <plugin>_module.{h,cpp}  # Register with Engine::add_singleton()
+└── <plugin>.gdip       # Plugin manifest (binaries, frameworks, init functions)
+
+addons/<plugin>/
+├── plugin.cfg          # Editor plugin manifest
+├── <main>.gd           # GDScript autoload (signal forwarding)
+└── example/            # Demo code & debug tools
+```
+
+**Critical:** `.gdip` `initialization=` MUST match `_module.cpp` function name exactly.
+
+## Logging Conventions
+
+**Prefix Standards:**
+- **C++/ObjC Layer** (`.mm` files): Use `[<PluginName>]` prefix
+  - TapTap: `NSLog(@"[Godot3TapTap] ...")`
+  - ASA: `NSLog(@"[Godot3ASA] ...")`
+- **GDScript Layer** (`.gd` files): Use `[<Abbrev>]` prefix
+  - TapTap: `print("[TapTap] ...")`
+  - ASA: `print("[ASA] ...")` (autoload node)
+
+This convention helps distinguish which layer produced each log entry during debugging.
+
+## ASA Plugin Specifics
+
+### Architecture Differences from TapTap
+- **Direct Signal Emission**: Uses `emit_signal()` instead of event queue (simpler async pattern)
+- **No Event Polling**: Signals fire immediately when AdServices API responds
+- **Autoload Pattern**: GDScript accessible via `ASA` global (registered in `plugin.gd`)
+- **Device Detection**: Check `ASA.is_supported()` before use (iOS 14.3+, real device required)
+
+### AppSA Reporting System
+```gdscript
+# Pending queue prevents data loss during attribution
+ASA.set_appsa_from_key("your_qimai_key")
+ASA.perform_attribution()  # Starts attribution
+
+# These calls are queued if attribution still in progress:
+ASA.report_activation()    # Only after attribution succeeds
+ASA.report_register()      # Safe to call immediately - will queue if needed
+```
+
+**Queue Behavior:**
+- `is_attribution_pending` flag set during `perform_attribution()`
+- All `report_*` calls queued until `onASAAttributionReceived` fires
+- Queue processed automatically after successful attribution
+- Skip reporting if `attribution=false` (user not from ASA)
+
+### Debug Panel Usage
+```gdscript
+# Attach to CanvasLayer for always-on-top display
+var panel = preload("res://addons/godot3_asa/example/asa_debug_panel.gd").new()
+$CanvasLayer.add_child(panel)  # Auto-connects to ASA signals
+```
+
+Features:
+- **Editor Preview**: Mock data shown via `OS.has_feature("editor")`
+- **Real-time Display**: Token and attribution JSON with copy buttons
+- **Error Handling**: Shows device incompatibility, network errors in red
+- **Smart Parenting**: Adds UI as child of script node (not root) for flexible placement
+
+### Simulator Limitations
+AdServices **does not work in iOS Simulator** - `AAAttribution` class unavailable even on iOS 18 simulator. The plugin detects this:
+
+```objective-c
+// In godot3_asa.mm
+- (BOOL)isAdServicesSupported {
+    if (@available(iOS 14.3, *)) {
+        Class aaClass = NSClassFromString(@"AAAttribution");
+        if (aaClass == nil) {
+            NSLog(@"[Godot3ASA] AAAttribution class not found (may not be available on simulator)");
+            return NO;
+        }
+        return YES;
+    }
+    return NO;
+}
+```
+
+**Always test ASA features on physical iOS devices.**
+
+## API Consistency with Android Version (TapTap Only)
 
 ### Mandatory Method Signatures (Must Match taptap.gd)
 ```cpp
@@ -143,12 +232,21 @@ Unlike Android's `res/values/strings.xml`, iOS stores the decrypt key in `Info.p
 
 # 3. Manual single build (for development)
 scons target=release_debug arch=arm64 simulator=no plugin=godot3taptap version=3.x
+scons target=release_debug arch=arm64 simulator=no plugin=godot3_asa version=3.x
 ```
 
 **Target Confusion Alert:**
 - Use `release_debug` for builds matching official Godot templates (NOT `debug`)
 - CI renames `release_debug.xcframework` → `debug.xcframework` for distribution
 - SCons naming: `lib<plugin>.<arch>-<simulator|ios>.<target>.a`
+
+### Caching Strategy (CI)
+CI uses three cache layers for speed:
+1. **Python pip**: Built into `setup-python` action (`cache: 'pip'`)
+2. **SCons build cache**: `~/.scons_cache`, `godot/.scons_cache` - keyed by source file hashes
+3. **Godot headers**: `godot/bin` - keyed by `version.py` + core files hash
+
+This reduces 15-min builds to ~5 mins on cache hit.
 
 ### Local Development Testing
 ```bash
@@ -265,8 +363,10 @@ embedded=[
 3. **Function Name Mismatches:** `.gdip` initialization/deinitialization MUST match `_module.cpp` function names exactly (currently has mismatch - needs fixing!)
 4. **Simulator vs Device:** Builds for `simulator=yes` use different SDK path (`iphonesimulator` vs `iphoneos`)
 5. **Memory Management:** Always use `memnew`/`memdelete`, never `new`/`delete`
-6. **API Inconsistency:** Method signatures must EXACTLY match Android version for cross-platform compatibility
+6. **API Inconsistency:** Method signatures must EXACTLY match Android version for cross-platform compatibility (TapTap only)
 7. **Plist Key Names:** Use consistent keys like `TapTapDecryptKey` (not `taptap_decrypt_key` like Android resources)
+8. **ASA Simulator Testing:** AdServices doesn't work on simulators - always test on real devices
+9. **Logging Prefixes:** Use `[Godot3<Plugin>]` in .mm files, `[<Abbrev>]` in .gd files for clear debugging
 
 ## Testing & Debugging
 
