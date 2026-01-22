@@ -60,55 +60,80 @@
 				NSLog(@"[Godot3ASA] Token request failed: code=%ld, message=%@", (long)errorCode, errorMessage);
 				
 				// 发送失败信号给Godot
-				Godot3ASA::get_singleton()->emit_signal(
-					"onASATokenReceived",
-					"",
-					errorCode,
-					String::utf8([errorMessage UTF8String])
-				);
+				Godot3ASA *singleton = Godot3ASA::get_singleton();
+				if (singleton) {
+					singleton->emit_signal(
+						"onASATokenReceived",
+						"",
+						errorCode,
+						String::utf8([errorMessage UTF8String])
+					);
+				} else {
+					NSLog(@"[Godot3ASA] ERROR: Singleton is null, cannot emit signal");
+				}
 			} else if (token != nil && token.length > 0) {
 				// 成功获取token
 				NSLog(@"[Godot3ASA] Token received successfully, length: %lu", (unsigned long)token.length);
 				
 				// 发送成功信号给Godot
-				Godot3ASA::get_singleton()->emit_signal(
-					"onASATokenReceived",
-					String::utf8([token UTF8String]),
-					0,
-					""
-				);
+				Godot3ASA *singleton = Godot3ASA::get_singleton();
+				if (singleton) {
+					singleton->emit_signal(
+						"onASATokenReceived",
+						String::utf8([token UTF8String]),
+						0,
+						""
+					);
+				} else {
+					NSLog(@"[Godot3ASA] ERROR: Singleton is null, cannot emit signal");
+				}
 			} else {
 				// Token为空
 				NSLog(@"[Godot3ASA] Token is empty");
-				Godot3ASA::get_singleton()->emit_signal(
-					"onASATokenReceived",
-					"",
-					-1,
-					"Token is empty"
-				);
+				Godot3ASA *singleton = Godot3ASA::get_singleton();
+				if (singleton) {
+					singleton->emit_signal(
+						"onASATokenReceived",
+						"",
+						-1,
+						"Token is empty"
+					);
+				} else {
+					NSLog(@"[Godot3ASA] ERROR: Singleton is null, cannot emit signal");
+				}
 			}
 		});
 	} else {
 		// iOS版本不支持
 		NSLog(@"[Godot3ASA] AdServices not supported on this iOS version (requires iOS 14.3+)");
-		Godot3ASA::get_singleton()->emit_signal(
-			"onASATokenReceived",
-			"",
-			-2,
-			"AdServices not supported (iOS 14.3+ required)"
-		);
+		Godot3ASA *singleton = Godot3ASA::get_singleton();
+		if (singleton) {
+			singleton->emit_signal(
+				"onASATokenReceived",
+				"",
+				-2,
+				"AdServices not supported (iOS 14.3+ required)"
+			);
+		} else {
+			NSLog(@"[Godot3ASA] ERROR: Singleton is null, cannot emit signal");
+		}
 	}
 }
 
 - (void)requestAttributionDataWithToken:(NSString *)token {
 	if (!token || token.length == 0) {
 		NSLog(@"[Godot3ASA] Invalid token");
-		Godot3ASA::get_singleton()->emit_signal(
-			"onASAAttributionReceived",
-			"",
-			400,
-			"Invalid token"
-		);
+		Godot3ASA *singleton = Godot3ASA::get_singleton();
+		if (singleton) {
+			singleton->emit_signal(
+				"onASAAttributionReceived",
+				"",
+				400,
+				"Invalid token"
+			);
+		} else {
+			NSLog(@"[Godot3ASA] ERROR: Singleton is null, cannot emit signal");
+		}
 		return;
 	}
 	
@@ -135,12 +160,17 @@
 				// 网络错误
 				NSLog(@"[Godot3ASA] Network error: %@", [error localizedDescription]);
 				dispatch_async(dispatch_get_main_queue(), ^{
-					Godot3ASA::get_singleton()->emit_signal(
-						"onASAAttributionReceived",
-						"",
-						-1,
-						String::utf8([[error localizedDescription] UTF8String])
-					);
+					Godot3ASA *singleton = Godot3ASA::get_singleton();
+					if (singleton) {
+						singleton->emit_signal(
+							"onASAAttributionReceived",
+							"",
+							-1,
+							String::utf8([[error localizedDescription] UTF8String])
+						);
+					} else {
+						NSLog(@"[Godot3ASA] ERROR: Singleton is null, cannot emit signal");
+					}
 				});
 				return;
 			}
@@ -152,22 +182,32 @@
 					NSLog(@"[Godot3ASA] Attribution data received: %@", jsonString);
 					
 					dispatch_async(dispatch_get_main_queue(), ^{
-						Godot3ASA::get_singleton()->emit_signal(
-							"onASAAttributionReceived",
-							String::utf8([jsonString UTF8String]),
-							200,
-							""
-						);
+						Godot3ASA *singleton = Godot3ASA::get_singleton();
+						if (singleton) {
+							singleton->emit_signal(
+								"onASAAttributionReceived",
+								String::utf8([jsonString UTF8String]),
+								200,
+								""
+							);
+						} else {
+							NSLog(@"[Godot3ASA] ERROR: Singleton is null, cannot emit signal");
+						}
 					});
 				} else {
 					NSLog(@"[Godot3ASA] Empty response data");
 					dispatch_async(dispatch_get_main_queue(), ^{
-						Godot3ASA::get_singleton()->emit_signal(
-							"onASAAttributionReceived",
-							"",
-							200,
-							"Empty response"
-						);
+						Godot3ASA *singleton = Godot3ASA::get_singleton();
+						if (singleton) {
+							singleton->emit_signal(
+								"onASAAttributionReceived",
+								"",
+								200,
+								"Empty response"
+							);
+						} else {
+							NSLog(@"[Godot3ASA] ERROR: Singleton is null, cannot emit signal");
+						}
 					});
 				}
 			} else {
@@ -176,12 +216,17 @@
 				NSLog(@"[Godot3ASA] HTTP error: %@", errorMsg);
 				
 				dispatch_async(dispatch_get_main_queue(), ^{
-					Godot3ASA::get_singleton()->emit_signal(
-						"onASAAttributionReceived",
-						"",
-						statusCode,
-						String::utf8([errorMsg UTF8String])
-					);
+					Godot3ASA *singleton = Godot3ASA::get_singleton();
+					if (singleton) {
+						singleton->emit_signal(
+							"onASAAttributionReceived",
+							"",
+							statusCode,
+							String::utf8([errorMsg UTF8String])
+						);
+					} else {
+						NSLog(@"[Godot3ASA] ERROR: Singleton is null, cannot emit signal");
+					}
 				});
 			}
 		}];
@@ -202,23 +247,33 @@
 				NSString *errorMessage = [error localizedDescription];
 				NSLog(@"[Godot3ASA] Full attribution failed at token stage: %@", errorMessage);
 				
-				Godot3ASA::get_singleton()->emit_signal(
-					"onASAAttributionReceived",
-					"",
-					errorCode,
-					String::utf8([errorMessage UTF8String])
-				);
+				Godot3ASA *singleton = Godot3ASA::get_singleton();
+				if (singleton) {
+					singleton->emit_signal(
+						"onASAAttributionReceived",
+						"",
+						errorCode,
+						String::utf8([errorMessage UTF8String])
+					);
+				} else {
+					NSLog(@"[Godot3ASA] ERROR: Singleton is null, cannot emit signal");
+				}
 				return;
 			}
 			
 			if (!token || token.length == 0) {
 				NSLog(@"[Godot3ASA] Full attribution failed: empty token");
-				Godot3ASA::get_singleton()->emit_signal(
-					"onASAAttributionReceived",
-					"",
-					-1,
-					"Empty token"
-				);
+				Godot3ASA *singleton = Godot3ASA::get_singleton();
+				if (singleton) {
+					singleton->emit_signal(
+						"onASAAttributionReceived",
+						"",
+						-1,
+						"Empty token"
+					);
+				} else {
+					NSLog(@"[Godot3ASA] ERROR: Singleton is null, cannot emit signal");
+				}
 				return;
 			}
 			
@@ -227,12 +282,17 @@
 		});
 	} else {
 		NSLog(@"[Godot3ASA] Full attribution not supported on this iOS version");
-		Godot3ASA::get_singleton()->emit_signal(
-			"onASAAttributionReceived",
-			"",
-			-2,
-			"AdServices not supported (iOS 14.3+ required)"
-		);
+		Godot3ASA *singleton = Godot3ASA::get_singleton();
+		if (singleton) {
+			singleton->emit_signal(
+				"onASAAttributionReceived",
+				"",
+				-2,
+				"AdServices not supported (iOS 14.3+ required)"
+			);
+		} else {
+			NSLog(@"[Godot3ASA] ERROR: Singleton is null, cannot emit signal");
+		}
 	}
 }
 

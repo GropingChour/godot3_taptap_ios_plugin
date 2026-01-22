@@ -43,17 +43,56 @@ func _ready():
 		print("[ASA Debug] Running in editor mode with mock data")
 		call_deferred("_fill_mock_data")
 	else:
-		# 真实运行模式：检查支持情况并连接信号
-        var _is_supported = ASA.is_supported() # 预先调用以避免延迟
-        print("[ASA Debug] Running on iOS device, checking ASA support: %s" % _is_supported)
-		if not _is_supported:
-			print("[ASA Debug] ERROR: ASA not supported on this device")
-			call_deferred("_show_error", "AdServices not supported (requires iOS 14.3+)")
-			return
-		print("[ASA Debug] ASA supported, connecting signals")
-		ASA.connect("onASATokenReceived", self, "_on_token_received")
-		ASA.connect("onASAAttributionReceived", self, "_on_attribution_received")
-		print("[ASA Debug] Connected to ASA autoload signals")
+		# 真实运行模式：确保ASA已加载后再连接信号
+		call_deferred("_connect_to_asa")
+
+func _connect_to_asa():
+	"""延迟连接到ASA autoload，确保ASA已初始化且UI已创建"""
+	# 检查ASA是否存在
+	if not has_node("/root/ASA"):
+		print("[ASA Debug] ERROR: ASA autoload not found")
+		_show_error("ASA autoload not found (check plugin configuration)")
+		return
+	
+	var asa_node = get_node("/root/ASA")
+	if not asa_node:
+		print("[ASA Debug] ERROR: ASA node is null")
+		_show_error("ASA node is null")
+		return
+	
+	# 检查支持情况
+	if not asa_node.has_method("is_supported"):
+		print("[ASA Debug] ERROR: ASA node missing is_supported method")
+		_show_error("ASA plugin version mismatch")
+		return
+	
+	var _is_supported = asa_node.is_supported()
+	print("[ASA Debug] Running on iOS device, checking ASA support: %s" % _is_supported)
+	
+	if not _is_supported:
+		print("[ASA Debug] ERROR: ASA not supported on this device")
+		_show_error("AdServices not supported (requires iOS 14.3+)")
+		return
+	
+	# 连接信号（防止重复连接）
+	print("[ASA Debug] ASA supported, connecting signals")
+	if not asa_node.is_connected("onASATokenReceived", self, "_on_token_received"):
+		var err = asa_node.connect("onASATokenReceived", self, "_on_token_received")
+		if err != OK:
+			print("[ASA Debug] ERROR: Failed to connect onASATokenReceived: ", err)
+		else:
+			print("[ASA Debug] Connected to onASATokenReceived")
+	else:
+		print("[ASA Debug] WARNING: onASATokenReceived already connected")
+	
+	if not asa_node.is_connected("onASAAttributionReceived", self, "_on_attribution_received"):
+		var err = asa_node.connect("onASAAttributionReceived", self, "_on_attribution_received")
+		if err != OK:
+			print("[ASA Debug] ERROR: Failed to connect onASAAttributionReceived: ", err)
+		else:
+			print("[ASA Debug] Connected to onASAAttributionReceived")
+	else:
+		print("[ASA Debug] WARNING: onASAAttributionReceived already connected")
 
 # ============================================================================
 # UI 创建
@@ -217,6 +256,11 @@ func _on_token_received(token: String, error_code: int, error_message: String):
 	# Token 接收回调
 	print("[ASA Debug] Token callback: code=", error_code)
 	
+	# 检查UI节点是否有效
+	if not is_instance_valid(token_label) or not is_instance_valid(copy_token_btn):
+		print("[ASA Debug] ERROR: UI nodes not ready for token callback")
+		return
+	
 	if error_code == 0 and not token.empty():
 		cached_token = token
 		var display_token = token.substr(0, 120) + ("..." if token.length() > 120 else "")
@@ -235,6 +279,11 @@ func _on_token_received(token: String, error_code: int, error_message: String):
 func _on_attribution_received(data: String, code: int, message: String):
 	# 归因数据接收回调
 	print("[ASA Debug] Attribution callback: code=", code)
+	
+	# 检查UI节点是否有效
+	if not is_instance_valid(attribution_label) or not is_instance_valid(copy_attr_btn) or not is_instance_valid(copy_all_btn):
+		print("[ASA Debug] ERROR: UI nodes not ready for attribution callback")
+		return
 	
 	if code == 200 and not data.empty():
 		var json = JSON.parse(data)
@@ -408,6 +457,14 @@ func _fill_mock_data():
 # ============================================================================
 
 func _exit_tree():
+	# 清理信号连接
+	if has_node("/root/ASA"):
+		var asa_node = get_node("/root/ASA")
+		if asa_node and asa_node.is_connected("onASATokenReceived", self, "_on_token_received"):
+			asa_node.disconnect("onASATokenReceived", self, "_on_token_received")
+		if asa_node and asa_node.is_connected("onASAAttributionReceived", self, "_on_attribution_received"):
+			asa_node.disconnect("onASAAttributionReceived", self, "_on_attribution_received")
+	
 	# 清理 UI
 	if ui_panel and is_instance_valid(ui_panel):
 		ui_panel.queue_free()

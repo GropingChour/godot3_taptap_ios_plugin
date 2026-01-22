@@ -48,11 +48,24 @@ var retry_count: int = 0
 # ============================================================================
 # 初始化
 # ============================================================================
-
+# 在节点准备好后执行初始化逻辑, 保证ASA的_ready优先执行
 func _ready():
+	call_deferred("_ready_late")
+
+func _ready_late():
 	# 检查是否在 iOS 平台
 	if OS.get_name() != "iOS":
 		print(LOG_PREFIX, " Not iOS platform, example disabled")
+		return
+	
+	# 检查ASA autoload是否存在
+	if not has_node("/root/ASA"):
+		print(LOG_PREFIX, " ERROR: ASA autoload not found")
+		return
+	
+	var asa_node = get_node("/root/ASA")
+	if not asa_node:
+		print(LOG_PREFIX, " ERROR: ASA node is null")
 		return
 	
 	# 初始化配置文件
@@ -61,17 +74,20 @@ func _ready():
 	
 	# 设置 AppSA from 参数
 	if not appsa_from_key.empty() and appsa_from_key != "your_from_key_here":
-		ASA.set_appsa_from_key(appsa_from_key)
+		asa_node.set_appsa_from_key(appsa_from_key)
 	else:
 		print(LOG_PREFIX, " Warning: AppSA from_key not configured")
 	
-	# 连接信号
-	ASA.connect("onASAAttributionReceived", self, "_on_attribution_received")
-	ASA.connect("onAppSAReportSuccess", self, "_on_appsa_report_success")
-	ASA.connect("onAppSAReportFailed", self, "_on_appsa_report_failed")
+	# 连接信号（防止重复连接）
+	if not asa_node.is_connected("onASAAttributionReceived", self, "_on_attribution_received"):
+		asa_node.connect("onASAAttributionReceived", self, "_on_attribution_received")
+	if not asa_node.is_connected("onAppSAReportSuccess", self, "_on_appsa_report_success"):
+		asa_node.connect("onAppSAReportSuccess", self, "_on_appsa_report_success")
+	if not asa_node.is_connected("onAppSAReportFailed", self, "_on_appsa_report_failed"):
+		asa_node.connect("onAppSAReportFailed", self, "_on_appsa_report_failed")
 	
 	# 检查是否支持 ASA
-	if not ASA.is_supported():
+	if not asa_node.is_supported():
 		print(LOG_PREFIX, " AdServices not supported on this device (requires iOS 14.3+)")
 		return
 	
@@ -80,13 +96,13 @@ func _ready():
 	# SDK 会自动将事件加入队列，等待归因完成后处理
 	if auto_report_register and is_first_launch():
 		print(LOG_PREFIX, " First launch - reporting register event...")
-		ASA.report_register()
+		asa_node.report_register()
 		mark_registered()
 	
 	# 上报登录事件
 	if auto_report_login:
 		print(LOG_PREFIX, " Reporting login event...")
-		ASA.report_login()
+		asa_node.report_login()
 	
 	# 如果启用自动归因且是首次启动
 	if auto_attribution and is_first_launch():
@@ -95,7 +111,7 @@ func _ready():
 	else:
 		print(LOG_PREFIX, " Not first launch or auto attribution disabled")
 		# 尝试加载本地缓存的归因数据
-		if ASA.load_attribution_data():
+		if asa_node.load_attribution_data():
 			print(LOG_PREFIX, " Attribution data loaded from cache")
 
 # ============================================================================

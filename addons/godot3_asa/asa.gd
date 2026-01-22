@@ -54,9 +54,19 @@ func _ready():
 	
 	if Engine.has_singleton(PLUGIN_NAME):
 		singleton = Engine.get_singleton(PLUGIN_NAME)
-		singleton.connect("onASAAttributionReceived", self, "_on_attribution_received")
-		singleton.connect("onASATokenReceived", self, "_on_token_received")
-		print("[ASA] ", PLUGIN_NAME, " singleton ready")
+		if singleton:
+			# 防止重复连接
+			if not singleton.is_connected("onASAAttributionReceived", self, "_on_attribution_received"):
+				var err1 = singleton.connect("onASAAttributionReceived", self, "_on_attribution_received")
+				if err1 != OK:
+					print("[ASA] ERROR: Failed to connect onASAAttributionReceived: ", err1)
+			if not singleton.is_connected("onASATokenReceived", self, "_on_token_received"):
+				var err2 = singleton.connect("onASATokenReceived", self, "_on_token_received")
+				if err2 != OK:
+					print("[ASA] ERROR: Failed to connect onASATokenReceived: ", err2)
+			print("[ASA] ", PLUGIN_NAME, " singleton ready")
+		else:
+			print("[ASA] ERROR: Singleton is null despite Engine.has_singleton() returning true")
 	else:
 		print("[ASA] ", PLUGIN_NAME, " singleton not found")
 	
@@ -72,6 +82,7 @@ func _ready():
 func is_supported() -> bool:
 	"""检查当前设备是否支持 ASA 归因（iOS 14.3+）"""
 	if not singleton:
+		print("[ASA] Singleton not available, so not supported")
 		return false
 	return singleton.isSupported()
 
@@ -104,7 +115,7 @@ func request_attribution_data(token: String) -> void:
 	一般情况下使用 perform_attribution() 即可，无需单独调用此方法
 	
 	Args:
-	    token: 通过 request_attribution_token() 获取的 token
+		token: 通过 request_attribution_token() 获取的 token
 	"""
 	if not singleton:
 		push_error("[ASA] Singleton not available")
@@ -117,7 +128,7 @@ func get_attribution_data() -> Dictionary:
 	获取缓存的归因数据
 	
 	Returns:
-	    Dictionary: 归因数据，如果未归因则返回空字典
+		Dictionary: 归因数据，如果未归因则返回空字典
 	"""
 	return attribution_data
 
@@ -126,7 +137,7 @@ func is_from_asa() -> bool:
 	检查用户是否来自 ASA 广告
 	
 	Returns:
-	    bool: true 表示来自 ASA，false 表示不来自或未归因
+		bool: true 表示来自 ASA，false 表示不来自或未归因
 	"""
 	return is_attributed and attribution_data.get("attribution", false)
 
@@ -140,7 +151,7 @@ func set_appsa_from_key(from_key: String) -> void:
 	此参数由七麦提供，必须在上报前设置
 	
 	Args:
-	    from_key: 七麦提供的 from 参数
+		from_key: 七麦提供的 from 参数
 	"""
 	appsa_from_key = from_key
 	print("[ASA] AppSA from key set: ", from_key)
@@ -214,8 +225,8 @@ func report_revenue(amount: float, currency: String = "USD") -> void:
 	上报收入事件（按次上报）
 	
 	Args:
-	    amount: 订单金额，支持小数点后四位
-	    currency: 货币符号，如 "USD", "RMB"
+		amount: 订单金额，支持小数点后四位
+		currency: 货币符号，如 "USD", "RMB"
 	"""
 	var event_values = {
 		"revenue": "%.4f" % amount,
@@ -249,8 +260,8 @@ func report_retention_day1_summary(amount: int, date: String) -> void:
 	一天只上报一次，新数据会覆盖旧数据
 	
 	Args:
-	    amount: 留存用户数量
-	    date: 事件发生日期，格式 "YYYY-MM-DD"
+		amount: 留存用户数量
+		date: 事件发生日期，格式 "YYYY-MM-DD"
 	"""
 	var event_values = {"amount": str(amount)}
 	_report_event("asa_retention_day1", event_values, false, date)
@@ -260,8 +271,8 @@ func report_retention_day3_summary(amount: int, date: String) -> void:
 	上报 3 日留存汇总数据（汇总上报）
 	
 	Args:
-	    amount: 留存用户数量
-	    date: 事件发生日期，格式 "YYYY-MM-DD"
+		amount: 留存用户数量
+		date: 事件发生日期，格式 "YYYY-MM-DD"
 	"""
 	var event_values = {"amount": str(amount)}
 	_report_event("asa_retention_day3", event_values, false, date)
@@ -271,8 +282,8 @@ func report_retention_day7_summary(amount: int, date: String) -> void:
 	上报 7 日留存汇总数据（汇总上报）
 	
 	Args:
-	    amount: 留存用户数量
-	    date: 事件发生日期，格式 "YYYY-MM-DD"
+		amount: 留存用户数量
+		date: 事件发生日期，格式 "YYYY-MM-DD"
 	"""
 	var event_values = {"amount": str(amount)}
 	_report_event("asa_retention_day7", event_values, false, date)
@@ -286,10 +297,10 @@ func _report_event(event_name: String, event_values: Dictionary, is_instant: boo
 	内部方法：上报事件到 AppSA
 	
 	Args:
-	    event_name: 事件名称
-	    event_values: 事件值
-	    is_instant: true=按次上报, false=汇总上报
-	    event_date: 事件日期（仅汇总上报需要），格式 "YYYY-MM-DD"
+		event_name: 事件名称
+		event_values: 事件值
+		is_instant: true=按次上报, false=汇总上报
+		event_date: 事件日期（仅汇总上报需要），格式 "YYYY-MM-DD"
 	"""
 	# 如果归因正在进行中，加入队列等待
 	if is_attribution_pending:
@@ -492,10 +503,10 @@ func save_attribution_data(file_path: String = "user://asa_attribution.json") ->
 	保存归因数据到本地文件
 	
 	Args:
-	    file_path: 保存路径，默认 "user://asa_attribution.json"
-	    
+		file_path: 保存路径，默认 "user://asa_attribution.json"
+		
 	Returns:
-	    bool: 保存是否成功
+		bool: 保存是否成功
 	"""
 	if not is_attributed:
 		return false
@@ -516,10 +527,10 @@ func load_attribution_data(file_path: String = "user://asa_attribution.json") ->
 	从本地文件加载归因数据
 	
 	Args:
-	    file_path: 文件路径，默认 "user://asa_attribution.json"
-	    
+		file_path: 文件路径，默认 "user://asa_attribution.json"
+		
 	Returns:
-	    bool: 加载是否成功
+		bool: 加载是否成功
 	"""
 	var file = File.new()
 	if not file.file_exists(file_path):
