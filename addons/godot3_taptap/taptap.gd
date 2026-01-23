@@ -264,6 +264,14 @@ func compliance():
 	if not singleton: return
 	singleton.compliance()
 
+func complianceExit():
+	# 退出合规认证
+	#
+	# 用于主动退出防沉迷认证及检查，通常在用户主动退出登录或切换账号时调用。
+	# 调用此接口后会触发 onComplianceResult 信号，code 为 EXITED (1000)
+	if not singleton: return
+	singleton.complianceExit()
+
 func httpDownloadAvatar(url: String):
 	# 创建 HTTP 请求节点并连接完成信号。
 	if not httpRequest:

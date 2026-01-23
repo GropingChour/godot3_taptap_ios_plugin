@@ -45,6 +45,7 @@ typedef PoolStringArray GodotStringArray;
 - (NSDictionary *)getUserProfile;
 - (void)logout;
 - (void)startComplianceWithUserId:(NSString *)userId;
+- (void)exitCompliance;
 
 @end
 
@@ -194,7 +195,6 @@ typedef PoolStringArray GodotStringArray;
 
 - (void)logout {
 	[TapTapLogin logout];
-	[TapTapCompliance exit];
 }
 
 - (void)startComplianceWithUserId:(NSString *)userId {
@@ -206,6 +206,10 @@ typedef PoolStringArray GodotStringArray;
 
 		[TapTapCompliance startup:userId];
 	});
+}
+
+- (void)exitCompliance {
+	[TapTapCompliance exit];
 }
 
 - (void)complianceCallbackWithCode:(TapComplianceResultHandlerCode)code extra:(NSString *_Nullable)extra {
@@ -345,6 +349,7 @@ void Godot3TapTap::_bind_methods() {
 
 	// 合规认证
 	ClassDB::bind_method(D_METHOD("compliance"), &Godot3TapTap::compliance);
+	ClassDB::bind_method(D_METHOD("complianceExit"), &Godot3TapTap::complianceExit);
 
 	// License & DLC（iOS 不支持）
 	ClassDB::bind_method(D_METHOD("checkLicense"), &Godot3TapTap::checkLicense);
@@ -433,6 +438,10 @@ void Godot3TapTap::compliance() {
 	if (account && account.userInfo && account.userInfo.unionId) {
 		[taptap_delegate startComplianceWithUserId:account.userInfo.unionId];
 	}
+}
+
+void Godot3TapTap::complianceExit() {
+	[taptap_delegate exitCompliance];
 }
 
 // License & DLC（iOS 不支持，返回占位）

@@ -67,6 +67,7 @@ public:
 	
 	// Compliance (Anti-addiction)
 	void compliance();
+	void complianceExit();
 	
 	// License Verification
 	void checkLicense(bool p_force_check);
