@@ -1,0 +1,105 @@
+―、ASA 归因接入（主要由客户端开发、服务端开发参与）
+1.自归因方式
+从2023年2月7日开始，苹果广告会停止使用 iad attribution API，iOS 14.2以及以下版本不会有归因方案，目前AdServices 适用于iOS14.3以及以上版本。
+苹果官方参考文档：Apple Ads 归因 API
+1.1 开发者接入自归因流程
+目的：
+开发者可以获取到每个激活用户是否来源于 ASA 投放，以及如果来源于 ASA 投放时，来自于哪个广告计划 ID、哪个关键词 ID、区分新老用户下载等，进而可以统计 ASA 投放带来用户的注册数、付费数、ROI 等。
+
+注意事项：
+Apple ads 后台投放不受归因接入影响，但仍建议客户投放前接好归因，以便准确评估 Apple ads 投放效果。
+
+
+
+1.1.1 客户接入自归因自检 List
+- 接入苹果 AdServices，用于支持 iOS14.3 及以上系统版本获取归因数据；
+- 打开 App，AdServices 是否可正常生成 token，是否服务端能收到返回 token；
+- 服务端使用 token 请求苹果归因接口，是否能正常返回数据；
+1.1.2 自归因业务流程
+以下流程图的自归因获取归因数据在服务端（推荐方式），开发者也可在 App 内获取到 token 后由 App 客户端获取归因数据（不推荐），获取逻辑基本一致。
+
+归因步骤文字版介绍：
+用户手机系统版本判断：在 App 首次打开先进行 OS version 判断：
+- 大于等于 iOS 14.3 调用 AdServices Framework 按下面步骤归因
+
+1. 在 App 首次激活时调用 AdServices Framework 获取 token
+  - 建议获取网络权限后，等待 500ms-1000ms再做 token 请求 
+  - 14.5 以上版本，先进行网络权限获取，关于 ATT 弹窗，有两种场景
+    - 客户在请求 token 之前做ATT弹窗，授权的用户设备在后续归因数据中，可以获取到detailed payload 归因数据（包含广告点击时间时间戳）；未授权的用户将获取到 standard payload（没有广告点击时间戳）
+    - 客户先请求 token，再做 ATT 弹窗或不做 ATT 弹窗，无论后续用户授权与否，获取到的归因数据均返回 standard payload（没有广告点击时间戳）
+2. 获取得到 token
+  - Token 返回成功：上报 Token 给服务器。
+  - Token 返回不成功：通过客户端上报报错日志。
+    - Token 的返回结果∶
+      - 2000「网络成功」「业务成功」成功
+      - 2001「网络失败」「业务失败」AAAttributionErrorcodeNetworkError
+      - 2002「网络成功」「业务失败」AAAtributionErrorcodelnternalError
+      - 2003「网络成功」「业务失败」AAAtributionErrorcodeplatformNotSupported
+  - 调查 Internal Error 请客户收集 Error description:+(nullable NSString)attributionTokenWithError:(NSError _autoreleasing_Nullable *Nullable)error;
+  - 如果 App 依然处于前台状态，进行重试，在时效性允许的前提下重试次数无上限，重试间隔>= 5 秒，初步设定可以重试上限 3 次（24小时内重试多次获取的 token 都是同一个，不会发生变化）
+  - 如果 App 退出前台，在下一次打开进行 token 请求重试
+  - 对 token 请求成功率进行监测，建议成功率下降 >=5% 应触发预警机制，根据失败报错调查原因
+3. 请求获取归因数据，参考 苹果官方文档
+  - 在步骤 2 获取到 token，建议设置 500-1000 ms 等待时长后再执行步骤 3 请求归因数据
+  - 请求超时时间建议设置为>= 2000 ms
+4. 请求的响应处理
+  - 返回结果
+    - 200 成功，attribution=true 用户在过去 30 天内曾经点击过苹果广告窗；attribution=false 用户在过去 30 天没有点击过苹果广告
+    - 400 无效的 token
+    - 404 未获取到数据，请检查 token 是否过期（超过 24 小时）；如果 token 确认有效，则建议进行重试，重试时间间隔>= 5s
+    - 500 服务器异常，请稍后再试
+  - 未收到正常的返回结果（非 200）∶
+    - 进行重试，重试时间间隔>= 5 秒，在时效性允许的情况下重试次数无上限。
+    - 重试后仍然没有正常返回的情况下统计返回的报错日志，根据报错日志进行处理。
+关于测试：
+- 在完成以上步骤的接入后，使用 TestFlight 安装 App，联网打开获取 Token，使用 Token 请求归因API 返回结果，获取 attribution = true 值的假数据。
+- 过程中检查各步骤成功与否，返回时效性是否可接受，如发生报错统计报错发生的比例。
+- 客户也可以使用 Xcode 进行模拟 App 的安装行为进行批量测试，以测试各步骤的成功率。
+
+1.1.3 自归因代码示例 Objective-C 版本
+#import <AdServices/AdServices.h>
+
++ (void)attribute {
+    if (@available(iOS 14.3, *)) {
+        NSString *token = [AAAttribution attributionTokenWithError:nil];
+        // 14.3及以上使用AdServices
+    }
+}
+
+import AdServices
+
+class func attribute() {
+    if #available(iOS 14.3, *) {
+        let token: String = AAAttribution.attributionToken()
+        // 14.3及以上使用AdService
+    }
+}
+
+1.1.4 自归因返回字段释义 - adservices
+{
+    "attribution": true, # 是否是ASA来的，True代表ASA来的；非空
+    "orgId": 40669820, # 广告系列组ID；非空
+    "campaignId": 542370539, # 广告系列ID；非空
+    "conversionType": "Download" , # 新老下载，Download新，ReDownload重新下载；非空
+    "clickDate": "2020-04-08T17:17Z" , # 广告点击时间，UTC时区时间，+8小时等于北京时间；可能为空
+    "adGroupId": 542317095, # 广告组ID；非空
+    "countryOrRegion": "US", # 地区；非空
+    "keywordId": 87675432, # 关键词ID；可能为空
+    "adId": 542317136 # 广告对象与广告组之间分配关系的标识符；可能为空
+}
+
+1.1.5 自归因接入常见问题文档
+详细查看《 七麦数据归因、Management API接入FAQ》。
+
+1.2 自归因客户数据上报 AppSA 流程
+目的：
+客户把从苹果那获取到的自归因数据（苹果返回的数据）传给七麦 AppSA，AppSA 将数据整合展现到 AppSA 网站中，客户可查看例如某个关键词投放来的用户激活率、来源等数据，便于分析词对产品的长期价值来优化投放策略，同时方便客户直接在 AppSA 查看从广告展示一直到用户流失的完整流程的数据及转化率。
+
+注意事项：
+此项需要直接对接 API，需要对方按照AppSA的API文档进行对接。
+
+1.2.1 客户按照接口文档调试上报
+提供了对接文档，可直接查看《ASA自归因数据对接AppSA接口文档》
+
+1.2.2 七麦开通 AppSA 的登录账号给客户
+根据客户授权情况，七麦为客户开通可访问投放数据的 AppSA 账号（由客户提供手机号和邮箱，开通后提供初始登录密码），客户登录成功即可查看到数据。

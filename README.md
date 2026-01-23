@@ -1,8 +1,26 @@
-# STILL WORKING, NOT USE IT!!!
+> **Warning:** This project has not been fully validated, use with caution in production environments.
 
 # Godot3 TapTap iOS Plugin
 
 TapTap SDK integration plugin for Godot 3.x on iOS platform. This plugin wraps TapTap's login, compliance (anti-addiction), and core SDK functionalities as a Godot singleton accessible from GDScript.
+
+## Table of Contents
+
+- [Features](#features)
+- [Limitations](#limitations)
+- [SDK Components](#sdk-components)
+- [Requirements](#requirements)
+- [Quick Start](#quick-start)
+  - [1. Installation](#1-installation)
+  - [2. Configuration](#2-configuration)
+  - [3. Export Settings](#3-export-settings)
+  - [4. Usage Example](#4-usage-example)
+- [iOS Swift Configuration](#ios-swift-configuration)
+- [API Reference](#api-reference)
+- [Troubleshooting](#troubleshooting)
+- [Development & Building](#development--building)
+- [License](#license)
+- [Credits](#credits)
 
 ## Features
 
@@ -11,17 +29,17 @@ TapTap SDK integration plugin for Godot 3.x on iOS platform. This plugin wraps T
   - Retrieve user profile (openId, unionId, name, avatar)
   - Session management (login/logout)
 
-- **Compliance System** (Anti-addiction): 
+- **Compliance System** (Anti-addiction):
   - Real-name verification required by Chinese regulations
   - Age-based playtime restrictions
   - Automatic compliance checks
 
-- **Token Encryption**: 
+- **Token Encryption**:
   - XOR-based client token encryption
   - Visual configuration tool in Godot editor
   - Secure key storage in Info.plist
 
-- **Cross-Platform API**: 
+- **Cross-Platform API**:
   - Unified GDScript API with Android version
   - Same method signatures and signals
   - Platform-specific implementations
@@ -47,14 +65,13 @@ The plugin includes the following TapTap SDK frameworks (v3.x):
 - THEMISLite - Encryption library
 - Resource bundles (Login & Compliance UI)
 
-**Requirements**:
+## Requirements
+
 - iOS 12.0 or later
 - Xcode 14.0 or later with Swift support
 - **Always Embed Swift Standard Libraries must be enabled** (TapTap SDK uses Swift)
 
-**Note:** iOS plugins are only effective on iOS (either on a physical device or
-in the Xcode simulator). Their singletons will *not* be available when running
-the project from the editor, so you need to export your project to test your changes.
+**Note:** iOS plugins are only effective on iOS (either on a physical device or in the Xcode simulator). Their singletons will *not* be available when running the project from the editor, so you need to export your project to test your changes.
 
 ## Quick Start
 
@@ -92,8 +109,7 @@ YourProject/
 In **Project → Export → iOS**:
 - Add plugin: Check **Godot3 TapTap** in the Plugins section
 - The encryption key will be automatically merged to app's Info.plist
-- **Important**: Set **Always Embed Swift Standard Libraries = YES** in Xcode project settings
-  (The TapTap SDK requires Swift runtime support)
+- **Important**: Set **Always Embed Swift Standard Libraries = YES** in Xcode project settings (The TapTap SDK requires Swift runtime support)
 
 ### 4. Usage Example
 
@@ -129,6 +145,31 @@ func _on_compliance_result(code, info):
     print("Compliance result: ", code, " - ", info)
 ```
 
+## iOS Swift Configuration
+
+Based on TapTap SDK documentation, ensure the following Swift settings in your Xcode project to avoid runtime errors related to Swift standard libraries:
+
+### Build Settings Configuration
+
+1. **Always Embed Swift Standard Libraries**:
+   - In Xcode, select your project target → **Build Settings** tab
+   - Search for "Always Embed Swift Standard Libraries"
+   - Set to **YES** to always include Swift standard libraries, preventing startup errors like "Unable to find Swift standard library"
+
+2. **Swift Language Version**:
+   - In **Build Settings**, under **Swift Compiler - Language**, set **Swift Language Version** to **Swift 5**
+
+### Alternative: Add Dummy Swift File
+
+If the above settings don't resolve issues, add a dummy Swift file to force proper Swift/Objective-C bridging:
+
+1. In Xcode: **File → New → File → Swift File**
+2. Name it `Dummy.swift` (leave empty)
+3. When prompted, click **Create** to create the bridging header
+4. This automatically configures the project for Swift runtime linking
+
+These settings ensure compatibility with the TapTap SDK, which includes Swift components.
+
 ## API Reference
 
 See [addons/godot3_taptap/README.md](addons/godot3_taptap/README.md) for complete API documentation.
@@ -157,78 +198,6 @@ Undefined symbols for architecture arm64:
 2. Name it `Dummy.swift`, add empty content
 3. When prompted to create bridging header, click **Create**
 4. This forces Xcode to link Swift runtime libraries
-
-### Runtime Crash: "unrecognized selector sent to class"
-
-If the app crashes at startup with:
-```
-'+[TapTapEvent captureUncaughtException]: unrecognized selector sent to class'
-```
-
-**Root Cause**: Objective-C categories and class methods from the TapTap SDK (written in Swift) aren't being loaded properly at runtime.
-
-**Solution**: The plugin includes `-ObjC -all_load` linker flags in the `.gdip` file to force load all Objective-C symbols.
-
-### Linker Error: "duplicate symbol" with `-all_load`
-
-If you get duplicate symbol errors like:
-```
-duplicate symbol '_TapTapEvent' in:
-    TapTapBasicToolsSDK.framework/TapTapBasicToolsSDK
-    inappstore.framework/inappstore
-ld: 1 duplicate symbol for architecture arm64
-clang: error: linker command failed with exit code 1
-```
-
-**Cause**: Multiple frameworks contain the same symbols (likely from shared TapTap SDK code).
-
-**Solution**: Use selective force loading instead of `-all_load`:
-
-1. In Xcode, open your project
-2. Select your target → **Build Settings** → **All** → **Combined**
-3. Search for "Other Linker Flags"
-4. Replace the default with selective force load:
-   ```
-   -ObjC -force_load $(BUILT_PRODUCTS_DIR)/libgodot3_taptap.a
-   ```
-   Or for XCFramework:
-   ```
-   -ObjC
-   ```
-5. Remove the `.gdip` linker_flags setting temporarily to test
-6. Clean build and rebuild
-
-**Alternative Solution (Recommended for multiple plugins)**:
-
-1. Open Xcode project
-2. Target → Build Settings → search "Symbols"
-3. Set "Hide Symbols by Default" to **YES** 
-4. Add this to "Other Linker Flags":
-   ```
-   -ObjC -undefined suppress -flat_namespace
-   ```
-
-**Option 3: Add Dummy Swift File**
-
-This forces proper Swift/Objective-C runtime linking:
-1. In Xcode: **File → New → File → Swift File**
-2. Name it `Dummy.swift` (leave empty)
-3. When prompted to create bridging header, click **Create**
-4. Rebuild - this usually resolves symbol conflicts automatically
-
-### Token Looks Like "Garbage" in Logs
-
-If you see client token in logs as:
-```
-clientToken==j25Bb0{:qxz\^_v5q\^EOr[CUB08z3KJ8[H6...
-```
-
-**This is normal!** TapTap client tokens contain special characters (brackets, backslashes, etc.) after XOR decryption. The encryption/decryption is working correctly if:
-- No "Failed to decrypt" errors appear
-- SDK initialization succeeds
-- Login works properly
-
-The "garbage-looking" characters are valid token data, not a decryption error.
 
 ### Plugin Not Found
 

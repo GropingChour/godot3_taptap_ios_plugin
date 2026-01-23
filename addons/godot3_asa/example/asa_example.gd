@@ -71,10 +71,6 @@ func _ready_late():
 		print(LOG_PREFIX, " Reporting login...")
 		appsa_reporter.report_event(ASA.get_attribution_data(), "asa_login")
 	
-	if auto_report_login:
-		print(LOG_PREFIX, " Reporting login...")
-		appsa_reporter.report_event(ASA.get_attribution_data(), "asa_login")
-	
 	# 首次启动且开启自动归因
 	if auto_attribution and is_first_launch():
 		print(LOG_PREFIX, " Starting attribution...")

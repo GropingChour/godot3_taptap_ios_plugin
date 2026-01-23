@@ -1,0 +1,285 @@
+七麦-ASA 自归因数据对接 AppSA 接口文档
+初版发布时间：2022-05-10
+最后修改时间：2025-04-14 17:30:00
+
+
+概述v
+把ASA归因数据回传给AppSA旨为提供给运营人员准确衡量广告的投放效果，了解不同用户群的长期价值。关键词的归因能使运营人员针对不同受众的广告组和搜索结果关键词优化每次付费点击和每次转化费用。
+APP应用事件是归因成功后发生的事件（如注册、付费），记录用户的动态，帮助运营人员掌握广告带来的用户价值。
+
+适用范围
+已对接苹果归因API
+
+激活回传
+回传说明
+- 用户下载APP后首次打开时归因并回传，服务端对已经回传的设备进行标记；后续再打开APP时不再回传，避免一次下载多次回传。
+- 若需要在客户端直接进行回传，需做好排重处理。
+- Claimtype（appsa平台为claim_type）字段为苹果归因数据新增加自动，用来区分归因数据是经点击(Click)或者是经浏览(Impression)。由于客户更新可能会有延迟，平台会将未传claim_type字段的归因数据自动默认归类为经点击。
+接⼝说明
+接口地址
+https://api.appsa.com/thirdsdk/custom?from={xxx}
+from字段由七⻨提供，可以@七麦商务同学获取
+请求方法
+POST
+参数说明
+<!--br {mso-data-placement:same-cell;}--> td {white-space:nowrap;border:0.5pt solid #dee0e3;font-size:10pt;font-style:normal;font-weight:normal;vertical-align:middle;word-break:normal;word-wrap:normal;}键名类型必须默认值描述datajson是data.install_timestring是""激活时间，时间戳（毫秒）data.device_modelstring是iPhone设备类型：iPhone、iPaddata.os_versionstring是""设备系统版本data.app_namestring是""应用名称，和apple_store里面的相同data.attributionstring是"" "1" 或者 "0"；ads方式，attribution的值；data.org_idstring是""ads方式，orgId的值；data.campaign_idstring是""ads方式，campaignId的值；data.adgroup_idstring是""ads方式，adGroupId的值；data.keyword_idstring是""ads方式，keywordId的值；data.creativeset_idstring是""ads方式，adId的值；data.conversion_typestring是""'Download'/'Redownload'/'PreOrder'；ads方式，conversionType的值；data.country_or_regionstring是""ads方式，countryOrRegion的值；data.click_datestring是""ads方式，clickDate的值；data.source_fromstring是""归因数据的来源：adsdata.claim_typestring是Click经点击或者经浏览，Click：经点击，Impression：经浏览
+参数示例
+data = {
+    "install_time": 1612131408080,
+    "device_model":"iPhone",
+    "os_version":"16.3",
+    "app_name":"七麦数据",
+    "org_id":"1234567890",
+    "attribution":"1",
+    "campaign_id":"1234567890",
+    "adgroup_id":"1234567890",
+    "keyword_id":"12323222",
+    "creativeset_id":"1234567890",
+    "conversion_type":"Download",
+    "country_or_region":"US",
+    "click_date":"2022-08-22T07:35Z",
+    "source_from":"ads",
+    "claim_type":"Click"
+}
+
+
+响应说明
+键名
+说明
+类型
+必须
+描述
+code
+状态码
+int
+是
+10000表示成功，其它值表示错误
+msg
+提示信息
+string
+是
+成功返回ok，否则会返回相应的错误信息
+
+
+响应示例
+{
+ "code": 10000,
+ "msg": "ok"
+}
+
+
+请求示例
+cURL
+curl --location --request POST 'https://api.appsa.com/thirdsdk/custom?from=test' \
+--header 'User-Agent: Mozilla/5.0(WindowsNT10.0;Win64;x64)AppleWebKit/537.3' \
+--header 'Content-Type: application/x-www-form-urlencoded' \
+--data-urlencode 'data={
+    "install_time": 1612131408080,
+    "device_model":"iPhone",
+    "os_version":"16.3",
+    "app_name":"七麦数据",
+    "org_id":"1234567890",
+    "attribution":true,
+    "campaign_id":"1234567890",
+    "adgroup_id":"1234567890",
+    "keyword_id":"12323222",
+    "creativeset_id":"1234567890",
+    "conversion_type":"Download",
+    "country_or_region":"US",
+    "click_date":"",
+    "source_from":"ads",
+    "claim_type":"Click"
+}'
+
+
+应用内事件回传
+回传说明
+- 事件可以按次上报，部分事件可以汇总上报;
+- 汇总上报的事件,保证一次一天只回传一次,多次回传时新数据会覆盖旧数据;
+- event_date，event_time，install_time等时间相关字段的选择：
+汇总上报的事件：传入event_date字段，其他两个字段不传
+按次上报的事件：event_time字段为事件发生的时间必需传入。如果希望数据被统计到事件发生的时间，则install_time字段不传。如果希望数据被统计到激活的时间，则需传入install_time字段。
+
+接⼝地址
+https://api.appsa.com/thirdsdk/custom_inapp_event?from={xxx}
+from字段由七⻨提供，可以@七麦商务同学获取
+请求方法
+POST
+参数说明
+<!--br {mso-data-placement:same-cell;}--> td {white-space:nowrap;border:0.5pt solid #dee0e3;font-size:10pt;font-style:normal;font-weight:normal;vertical-align:middle;word-break:normal;word-wrap:normal;}键名类型必须默认值说明datajson是data.org_idstring是""广告系列组ID:ads方式，orgId的值data.campaign_idstring是""广告系列ID:ads方式，campaignId的值data.adgroup_idstring是""广告组ID:ads方式，adGroupId的值data.keyword_idstring是""关键词ID:ads方式，keywordId的值；data.creativeset_idstring是""广告ID:ads方式，adId的值；data.country_or_regionstring是""投放地区:ads方式，countryOrRegion的值；data.install_timestring否""激活时间戳，当希望把事件（如收入事件）统计到激活时间时必传，否则不传。data.event_namestring是""事件名，参考appsa默认事件定义data.event_valuesjson否""事件值，参考事件名的对应值data.event_timestring否""事件发生时间戳，按次回传时必传data.event_datestring否""事件发生的日期，汇总回传时必传data.claim_typestring是Click经点击或者经浏览，Click：经点击，Impression：经浏览
+
+参数示例
+data = {
+    "org_id":"567665586",
+    "campaign_id":"567665587",
+    "adgroup_id":"567665588",
+    "keyword_id":"567665590",
+    "creativeset_id":"567665591",
+    "country_or_region":"TW",
+    "event_name":"asa_revenue",
+    "event_values":{
+        "revenue":"100",
+        "currency": "RMB"
+    },
+    "event_time":"1691374923",
+    "claim_type":"Click"
+}
+
+
+响应说明
+键名
+说明
+类型
+必须
+描述
+code
+状态码
+int
+是
+10000表示成功，其它值表示错误
+msg
+提示信息
+string
+是
+成功返回ok，否则会返回相应的错误信息
+
+
+响应示例
+{
+ "code": 10000,
+ "msg": "ok"
+}
+
+
+请求示例
+cURL
+curl --location --request POST 'https://api.appsa.com/thirdsdk/custom_inapp_event?from=test' \
+--header 'User-Agent: Mozilla/5.0(WindowsNT10.0;Win64;x64)AppleWebKit/537.3' \
+--header 'Content-Type: application/x-www-form-urlencoded' \
+--data-urlencode 'data={
+    "org_id":"567665586",
+    "campaign_id":"567665587",
+    "adgroup_id":"567665588",
+    "keyword_id":"567665590",
+    "creativeset_id":"567665591",
+    "country_or_region":"TW",
+    "event_name":"asa_revenue",
+    "event_values":{
+        "revenue":"100",
+        "currency": "RMB"
+    },
+    "event_time":"1691374923"
+}'
+
+汇总事件请求示例
+cURL
+curl --location --request POST 'https://api.appsa.com/thirdsdk/custom_inapp_event?from=test' \
+--header 'User-Agent: Mozilla/5.0(WindowsNT10.0;Win64;x64)AppleWebKit/537.3' \
+--header 'Content-Type: application/x-www-form-urlencoded' \
+--data-urlencode 'data={
+    "org_id":"567665586",
+    "campaign_id":"567665587",
+    "adgroup_id":"567665588",
+    "keyword_id":"567665590",
+    "creativeset_id":"567665591",
+    "country_or_region":"TW",
+    "event_name":"asa_retention_day1",
+    "event_values":{
+        "amount":"100"
+    },
+    "event_date":"2023-10-11"
+}'
+
+appsa默认事件定义：
+
+
+回传类型
+事件名
+中文名
+事件说明
+事件值示例
+事件值说明
+按次回传
+
+asa_register
+注册
+当用户注册时发起
+无
+无
+
+asa_login
+登录
+当用户登录时发起
+无
+无
+
+asa_revenue
+
+收入
+（订单金额和订单数）
+
+当用户付费时发起，会统计订单金额和订单数。
+如果对订单金额敏感，可以不传事件值。
+
+{"revenue":"123.45","currency":"USD"}
+
+revenue：金额支持小数点后四位小数，appsa汇总时，会四舍五入保留两位小数
+currency:货币符号，美元USD，人民币RMB
+
+asa_pay_unique_user
+
+付费用户数
+
+当用户付费时，对付费的用户进行排重后发起
+
+无
+
+无
+
+
+asa_pay_device
+付费设备数
+当用户设备付款时，对付费的设备排重后发起
+无
+无
+
+asa_retention_day1
+1日留存
+应用激活后1天内仍活跃的用户
+无
+无
+
+asa_retention_day3
+3日留存
+应用激活后3天内仍活跃的用户
+无
+无
+
+asa_retention_day7
+7日留存
+应用激活后7天内仍活跃的用户
+无
+无
+汇总回传
+
+asa_retention_day1
+
+1日留存
+应用激活后1天内仍活跃的汇总用户数量
+{"amount":"100"}
+用户1日留存数量
+
+
+asa_retention_day3
+3日留存
+
+应用激活后3天内仍活跃的汇总用户数量
+{"amount":"100"}
+用户3日留存数量
+
+asa_retention_day7
+7日留存
+应用激活后7天内仍活跃的汇总用户数量
+{"amount":"100"}
+用户7日留存数量
+
