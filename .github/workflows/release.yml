@@ -95,7 +95,7 @@ jobs:
           tar -czf godot3_taptap-ios-plugin.tar.gz godot3_taptap/
 
       - name: Upload Release Artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: godot3_taptap-ios-plugin-release-${{ github.ref_name }}
           path: |
