@@ -15,9 +15,7 @@ linked=[
     "sdk/tapsdkcorecpp.xcframework",
     "sdk/TapTapSDKBridgeCore.xcframework",
     "sdk/TapTapLoginSDK.xcframework",
-    "sdk/TapTapLoginResource.bundle",
-    "sdk/TapTapComplianceSDK.xcframework",
-    "sdk/TapTapComplianceResource.bundle"
+    "sdk/TapTapComplianceSDK.xcframework"
 ]
 embedded=[]
 system=["libz.1.tbd", "libc++.tbd"]
@@ -26,7 +24,10 @@ linker_flags=["-ObjC"]
 
 capabilities=[]
 
-files=[]
+files=[
+    "sdk/TapTapLoginResource.bundle",
+    "sdk/TapTapComplianceResource.bundle"
+]
 
 [plist]
 TapTapDecryptKey:string_input="TapTap73sev5b6P5eZxAy2"
