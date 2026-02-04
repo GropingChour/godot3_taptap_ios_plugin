@@ -79,7 +79,7 @@ void Godot3StoreView::request_review() {
 }
 
 String Godot3StoreView::get_write_review_url(const String &app_store_id) {
-	if (app_store_id.is_empty()) {
+	if (app_store_id.empty()) {
 		NSLog(@"[Godot3StoreView] App Store ID is empty");
 		return "";
 	}
