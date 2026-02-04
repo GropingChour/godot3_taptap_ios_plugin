@@ -1,0 +1,21 @@
+[config]
+
+name="Godot3StoreView"
+binary="godot3_storeview.a"
+
+initialization="register_godot3_storeview_types"
+deinitialization="unregister_godot3_storeview_types"
+
+[dependencies]
+
+linked=["StoreKit.framework", "UIKit.framework"]
+embedded=[]
+system=[]
+
+capabilities=[]
+
+files=[]
+
+linker_flags=[]
+
+[plist]
