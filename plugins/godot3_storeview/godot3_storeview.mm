@@ -41,6 +41,8 @@ Godot3StoreView *Godot3StoreView::get_singleton() {
 }
 
 void Godot3StoreView::request_review() {
+	NSLog(@"[Godot3StoreView] Requesting App Store review...");
+	
 	// Check if the API is available (iOS 10.3+)
 	if (@available(iOS 10.3, *)) {
 		// SKStoreReviewController.requestReview() should be called on the main thread
@@ -61,16 +63,19 @@ void Godot3StoreView::request_review() {
 				
 				if (windowScene) {
 					[SKStoreReviewController requestReviewInScene:windowScene];
+					NSLog(@"[Godot3StoreView] Review request sent (iOS 14+ scene API)");
 				} else {
 					NSLog(@"[Godot3StoreView] No active window scene found");
 				}
 			} else {
 				// iOS 10.3-13.x - Use legacy API
 				[SKStoreReviewController requestReview];
+				NSLog(@"[Godot3StoreView] Review request sent (iOS 10.3-13.x legacy API)");
 			}
 #else
 			// iOS 10.3-13.x - Use legacy API
 			[SKStoreReviewController requestReview];
+			NSLog(@"[Godot3StoreView] Review request sent (iOS 10.3-13.x legacy API)");
 #endif
 		});
 	} else {
@@ -84,8 +89,13 @@ String Godot3StoreView::get_write_review_url(const String &app_store_id) {
 		return "";
 	}
 	
-	String url = "https://apps.apple.com/app/id" + app_store_id + "?action=write-review";
-	return url;
+	// Build URL using NSString for better safety
+	NSString *appId = [NSString stringWithUTF8String:app_store_id.utf8().get_data()];
+	NSString *urlString = [NSString stringWithFormat:@"https://apps.apple.com/app/id%@?action=write-review", appId];
+	
+	String result;
+	result.parse_utf8([urlString UTF8String]);
+	return result;
 }
 
 void Godot3StoreView::_bind_methods() {

@@ -8,14 +8,14 @@ deinitialization="unregister_godot3_storeview_types"
 
 [dependencies]
 
-linked=["StoreKit.framework", "UIKit.framework"]
+linked=[]
 embedded=[]
-system=[]
+system=["StoreKit.framework", "UIKit.framework"]
+
+linker_flags=[]
 
 capabilities=[]
 
 files=[]
-
-linker_flags=[]
 
 [plist]
