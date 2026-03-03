@@ -33,6 +33,11 @@ typedef PackedStringArray GodotStringArray;
 typedef PoolStringArray GodotStringArray;
 #endif
 
+// MARK: - Forward declarations
+
+@class GodotZipHelper;
+@class GodotCloudSaveCallback;
+
 // MARK: - Objective-C Delegate
 
 @interface GodotTapTapDelegate : NSObject <TapTapComplianceDelegate, TapTapCloudSaveCallback>
