@@ -20,8 +20,12 @@
 #import <TapTapComplianceSDK/TapTapComplianceOptions.h>
 #import <TapTapCoreSDK/TapTapSDK.h>
 #import <TapTapLoginSDK/TapTapLoginSDK-Swift.h>
+#import <TapTapCloudSaveSDK/TapTapCloudSaveSDK-Swift.h>
 #import <objc/message.h>
 #import <objc/runtime.h>
+#include <zlib.h>
+#include <dirent.h>
+#include <sys/stat.h>
 
 #if VERSION_MAJOR == 4
 typedef PackedStringArray GodotStringArray;
@@ -31,7 +35,7 @@ typedef PoolStringArray GodotStringArray;
 
 // MARK: - Objective-C Delegate
 
-@interface GodotTapTapDelegate : NSObject <TapTapComplianceDelegate>
+@interface GodotTapTapDelegate : NSObject <TapTapComplianceDelegate, TapTapCloudSaveCallback>
 
 @property(nonatomic, strong) NSString *clientId;
 @property(nonatomic, strong) NSString *clientToken;
@@ -47,6 +51,15 @@ typedef PoolStringArray GodotStringArray;
 - (void)startComplianceWithUserId:(NSString *)userId;
 - (void)exitCompliance;
 
+// Cloud Save
+- (void)onResult:(NSInteger)resultCode;
+- (void)createArchiveWithMetadata:(NSDictionary *)metadata filePath:(NSString *)filePath coverPath:(NSString *)coverPath;
+- (void)getArchiveList;
+- (void)downloadArchiveTo:(NSString *)localPath archiveUUID:(NSString *)archiveUUID fileID:(NSString *)fileID;
+- (void)updateArchiveUUID:(NSString *)archiveUUID metadata:(NSDictionary *)metadata filePath:(NSString *)filePath coverPath:(NSString *)coverPath;
+- (void)deleteArchiveUUID:(NSString *)archiveUUID;
+- (void)getArchiveCoverUUID:(NSString *)archiveUUID fileID:(NSString *)fileID;
+
 @end
 
 @implementation GodotTapTapDelegate
@@ -56,6 +69,8 @@ typedef PoolStringArray GodotStringArray;
 	if (self) {
 		_sdkInitialized = NO;
 		[TapTapCompliance registerComplianceDelegate:self];
+		[TapTapCloudSave ensureInitialization];
+		[TapTapCloudSave registerCloudSaveCallback:self];
 	}
 	return self;
 }
@@ -217,6 +232,140 @@ typedef PoolStringArray GodotStringArray;
 	Godot3TapTap::get_singleton()->emit_signal("onComplianceResult", (int)code, info);
 }
 
+// MARK: - Cloud Save delegate methods
+
+- (void)onResult:(NSInteger)resultCode {
+	NSLog(@"[TapTap CloudSave] onResult: resultCode=%ld", (long)resultCode);
+	Godot3TapTap::get_singleton()->emit_signal("onCloudSaveCallback", (int)resultCode);
+}
+
+- (ArchiveMetadata *)buildMetadata:(NSDictionary *)metadata {
+	NSString *name    = metadata[@"name"]    ?: @"";
+	NSString *summary = metadata[@"summary"] ?: @"";
+	NSString *extra   = metadata[@"extra"]   ?: @"";
+	int64_t  playtime = [metadata[@"playtime"] longLongValue];
+	return [[ArchiveMetadata alloc] initWithName:name summary:summary extra:extra playtime:playtime];
+}
+
+- (NSString *)zipAndGetPath:(NSString *)filePath tempSuffix:(NSString **)outTempPath {
+	NSFileManager *fm = [NSFileManager defaultManager];
+	BOOL isDir = NO;
+	if (![fm fileExistsAtPath:filePath isDirectory:&isDir]) {
+		NSLog(@"[TapTap CloudSave] zipAndGetPath: source path not found: %@", filePath);
+		return nil;
+	}
+	if (isDir) {
+		NSLog(@"[TapTap CloudSave] zipAndGetPath: compressing directory: %@", filePath);
+		NSString *tempZip = [filePath stringByAppendingString:@".cloudsave.tmp.zip"];
+		NSData *zipData = [GodotZipHelper zipPath:filePath];
+		if (!zipData) {
+			NSLog(@"[TapTap CloudSave] zipAndGetPath: failed to compress directory: %@", filePath);
+			return nil;
+		}
+		[zipData writeToFile:tempZip atomically:YES];
+		NSLog(@"[TapTap CloudSave] zipAndGetPath: zip written to: %@ (%lu bytes)", tempZip, (unsigned long)zipData.length);
+		if (outTempPath) *outTempPath = tempZip;
+		return tempZip;
+	}
+	NSLog(@"[TapTap CloudSave] zipAndGetPath: using file as-is: %@", filePath);
+	return filePath;
+}
+
+- (void)cleanupTempFile:(NSString *)tempPath {
+	if (tempPath && tempPath.length > 0) {
+		[[NSFileManager defaultManager] removeItemAtPath:tempPath error:nil];
+	}
+}
+
+- (void)createArchiveWithMetadata:(NSDictionary *)metadata filePath:(NSString *)filePath coverPath:(NSString *)coverPath {
+	NSLog(@"[TapTap CloudSave] createArchive: filePath=%@, coverPath=%@, metadata=%@", filePath, coverPath, metadata);
+	dispatch_async(dispatch_get_main_queue(), ^{
+		NSString *tempZip = nil;
+		NSString *actualPath = [self zipAndGetPath:filePath tempSuffix:&tempZip];
+		if (!actualPath) {
+			NSLog(@"[TapTap CloudSave] createArchive: file/zip failed, aborting");
+			Godot3TapTap::get_singleton()->emit_signal("onCreateArchiveFailed", String("{\"error\":\"File not found or zip failed\"}"));
+			return;
+		}
+		NSLog(@"[TapTap CloudSave] createArchive: uploading actualPath=%@", actualPath);
+		ArchiveMetadata *meta = [self buildMetadata:metadata];
+		NSString *coverArg = (coverPath && coverPath.length > 0) ? coverPath : nil;
+		GodotCloudSaveCallback *cb = [[GodotCloudSaveCallback alloc] initWithSuccess:@"onCreateArchiveSuccess"
+		                                                                       error:@"onCreateArchiveFailed"
+		                                                                   localPath:nil
+		                                                                     tempZip:tempZip];
+		[TapTapCloudSave createArchiveWithArchiveMetadata:meta
+		                                  archiveFilePath:actualPath
+		                                 archiveCoverPath:coverArg
+		                                         callback:cb];  // cleanup happens in callback
+	});
+}
+
+- (void)getArchiveList {
+	NSLog(@"[TapTap CloudSave] getArchiveList: requesting archive list");
+	dispatch_async(dispatch_get_main_queue(), ^{
+		GodotCloudSaveCallback *cb = [[GodotCloudSaveCallback alloc] initWithSuccess:@"onGetArchiveListSuccess"
+		                                                                       error:@"onGetArchiveListFailed"
+		                                                                   localPath:nil];
+		[TapTapCloudSave getArchiveListWithCallback:cb];
+	});
+}
+
+- (void)downloadArchiveTo:(NSString *)localPath archiveUUID:(NSString *)archiveUUID fileID:(NSString *)fileID {
+	NSLog(@"[TapTap CloudSave] downloadArchive: uuid=%@, fileID=%@, localPath=%@", archiveUUID, fileID, localPath);
+	dispatch_async(dispatch_get_main_queue(), ^{
+		GodotCloudSaveCallback *cb = [[GodotCloudSaveCallback alloc] initWithSuccess:@"onDownloadArchiveDataSuccess"
+		                                                                       error:@"onDownloadArchiveDataFailed"
+		                                                                   localPath:localPath];
+		[TapTapCloudSave getArchiveDataWithArchiveUUID:archiveUUID archiveFileID:fileID callback:cb];
+	});
+}
+
+- (void)updateArchiveUUID:(NSString *)archiveUUID metadata:(NSDictionary *)metadata filePath:(NSString *)filePath coverPath:(NSString *)coverPath {
+	NSLog(@"[TapTap CloudSave] updateArchive: uuid=%@, filePath=%@, coverPath=%@, metadata=%@", archiveUUID, filePath, coverPath, metadata);
+	dispatch_async(dispatch_get_main_queue(), ^{
+		NSString *tempZip = nil;
+		NSString *actualPath = [self zipAndGetPath:filePath tempSuffix:&tempZip];
+		if (!actualPath) {
+			NSLog(@"[TapTap CloudSave] updateArchive: file/zip failed, aborting");
+			Godot3TapTap::get_singleton()->emit_signal("onUpdateArchiveFailed", String("{\"error\":\"File not found or zip failed\"}"));
+			return;
+		}
+		NSLog(@"[TapTap CloudSave] updateArchive: uploading actualPath=%@", actualPath);
+		ArchiveMetadata *meta = [self buildMetadata:metadata];
+		NSString *coverArg = (coverPath && coverPath.length > 0) ? coverPath : nil;
+		GodotCloudSaveCallback *cb = [[GodotCloudSaveCallback alloc] initWithSuccess:@"onUpdateArchiveSuccess"
+		                                                                       error:@"onUpdateArchiveFailed"
+		                                                                   localPath:nil
+		                                                                     tempZip:tempZip];
+		[TapTapCloudSave updateArchiveWithArchiveUUID:archiveUUID
+		                              archiveMetadata:meta
+		                              archiveFilePath:actualPath
+		                             archiveCoverPath:coverArg
+		                                     callback:cb];  // cleanup happens in callback
+	});
+}
+
+- (void)deleteArchiveUUID:(NSString *)archiveUUID {
+	NSLog(@"[TapTap CloudSave] deleteArchive: uuid=%@", archiveUUID);
+	dispatch_async(dispatch_get_main_queue(), ^{
+		GodotCloudSaveCallback *cb = [[GodotCloudSaveCallback alloc] initWithSuccess:@"onDeleteArchiveSuccess"
+		                                                                       error:@"onDeleteArchiveFailed"
+		                                                                   localPath:nil];
+		[TapTapCloudSave deleteArchiveWithArchiveUUID:archiveUUID callback:cb];
+	});
+}
+
+- (void)getArchiveCoverUUID:(NSString *)archiveUUID fileID:(NSString *)fileID {
+	NSLog(@"[TapTap CloudSave] getArchiveCover: uuid=%@, fileID=%@", archiveUUID, fileID);
+	dispatch_async(dispatch_get_main_queue(), ^{
+		GodotCloudSaveCallback *cb = [[GodotCloudSaveCallback alloc] initWithSuccess:@"onGetArchiveCoverSuccess"
+		                                                                       error:@"onGetArchiveCoverFailed"
+		                                                                   localPath:nil];
+		[TapTapCloudSave getArchiveCoverWithArchiveUUID:archiveUUID archiveFileID:fileID callback:cb];
+	});
+}
+
 @end
 
 // MARK: - TapTap Injector for OpenURL
@@ -331,6 +480,466 @@ typedef PoolStringArray GodotStringArray;
 // MARK: - Static delegate instance
 static GodotTapTapDelegate *taptap_delegate = nil;
 
+// MARK: - ZIP Helper (using libz for standard ZIP format)
+
+static void zip_write_le16(NSMutableData *buf, uint16_t v) {
+	uint8_t b[2] = { (uint8_t)(v & 0xFF), (uint8_t)(v >> 8) };
+	[buf appendBytes:b length:2];
+}
+
+static void zip_write_le32(NSMutableData *buf, uint32_t v) {
+	uint8_t b[4] = { (uint8_t)(v & 0xFF), (uint8_t)((v >> 8) & 0xFF), (uint8_t)((v >> 16) & 0xFF), (uint8_t)(v >> 24) };
+	[buf appendBytes:b length:4];
+}
+
+static uint16_t zip_read_le16(const uint8_t *p) {
+	return (uint16_t)(p[0] | ((uint16_t)p[1] << 8));
+}
+
+static uint32_t zip_read_le32(const uint8_t *p) {
+	return (uint32_t)(p[0] | ((uint32_t)p[1] << 8) | ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24));
+}
+
+static const uint32_t kZipLFHSig  = 0x04034b50U;
+static const uint32_t kZipCDHSig  = 0x02014b50U;
+static const uint32_t kZipEOCDSig = 0x06054b50U;
+
+@interface GodotZipHelper : NSObject
+
++ (NSData *)zipPath:(NSString *)sourcePath;
++ (BOOL)unzipData:(NSData *)zipData toPath:(NSString *)destPath;
+
+@end
+
+@implementation GodotZipHelper
+
+/// Compress one file and append local header + compressed data to buf.
+/// Adds a central directory entry dict to entries.
++ (void)addFile:(NSString *)filePath entryName:(NSString *)entryName buf:(NSMutableData *)buf entries:(NSMutableArray *)entries {
+	NSData *raw = [NSData dataWithContentsOfFile:filePath];
+	if (!raw) return;
+
+	uint32_t crc = (uint32_t)crc32(0, (const Bytef *)raw.bytes, (uInt)raw.length);
+
+	// Deflate with raw stream (wbits = -15)
+	uLongf bound = compressBound((uLong)raw.length) + 32;
+	NSMutableData *comp = [NSMutableData dataWithLength:bound];
+	z_stream zs;
+	memset(&zs, 0, sizeof(zs));
+	deflateInit2(&zs, Z_DEFAULT_COMPRESSION, Z_DEFLATED, -15, 8, Z_DEFAULT_STRATEGY);
+	zs.next_in  = (Bytef *)raw.bytes;
+	zs.avail_in = (uInt)raw.length;
+	zs.next_out = (Bytef *)comp.mutableBytes;
+	zs.avail_out = (uInt)bound;
+	deflate(&zs, Z_FINISH);
+	deflateEnd(&zs);
+	uint32_t compSize = (uint32_t)(bound - zs.avail_out);
+	[comp setLength:compSize];
+
+	NSData *nameBytes = [entryName dataUsingEncoding:NSUTF8StringEncoding];
+	uint32_t offset = (uint32_t)buf.length;
+
+	// Local file header
+	zip_write_le32(buf, kZipLFHSig);
+	zip_write_le16(buf, 20);                         // version needed
+	zip_write_le16(buf, 0);                          // flags
+	zip_write_le16(buf, 8);                          // DEFLATE
+	zip_write_le16(buf, 0);                          // mod time
+	zip_write_le16(buf, 0);                          // mod date
+	zip_write_le32(buf, crc);
+	zip_write_le32(buf, compSize);
+	zip_write_le32(buf, (uint32_t)raw.length);
+	zip_write_le16(buf, (uint16_t)nameBytes.length);
+	zip_write_le16(buf, 0);                          // extra len
+	[buf appendData:nameBytes];
+	[buf appendData:comp];
+
+	[entries addObject:@{
+		@"name"           : entryName,
+		@"crc32"          : @(crc),
+		@"compressedSize" : @(compSize),
+		@"uncompSize"     : @((uint32_t)raw.length),
+		@"offset"         : @(offset),
+		@"compression"    : @(8),
+		@"isDir"          : @NO
+	}];
+}
+
+/// Add a directory entry (0-byte stored entry with trailing /)
++ (void)addDirEntry:(NSString *)entryName buf:(NSMutableData *)buf entries:(NSMutableArray *)entries {
+	NSString *nameWithSlash = [entryName hasSuffix:@"/"] ? entryName : [entryName stringByAppendingString:@"/"];
+	NSData *nameBytes = [nameWithSlash dataUsingEncoding:NSUTF8StringEncoding];
+	uint32_t offset = (uint32_t)buf.length;
+
+	zip_write_le32(buf, kZipLFHSig);
+	zip_write_le16(buf, 20);
+	zip_write_le16(buf, 0);
+	zip_write_le16(buf, 0);  // STORE
+	zip_write_le16(buf, 0);
+	zip_write_le16(buf, 0);
+	zip_write_le32(buf, 0);
+	zip_write_le32(buf, 0);
+	zip_write_le32(buf, 0);
+	zip_write_le16(buf, (uint16_t)nameBytes.length);
+	zip_write_le16(buf, 0);
+	[buf appendData:nameBytes];
+
+	[entries addObject:@{
+		@"name"           : nameWithSlash,
+		@"crc32"          : @(0U),
+		@"compressedSize" : @(0U),
+		@"uncompSize"     : @(0U),
+		@"offset"         : @(offset),
+		@"compression"    : @(0),
+		@"isDir"          : @YES
+	}];
+}
+
+/// Recursively add directory contents.
++ (void)addDirectory:(NSString *)dirPath base:(NSString *)base buf:(NSMutableData *)buf entries:(NSMutableArray *)entries {
+	NSFileManager *fm = [NSFileManager defaultManager];
+	NSArray *items = [fm contentsOfDirectoryAtPath:dirPath error:nil];
+	for (NSString *item in items) {
+		NSString *fullPath = [dirPath stringByAppendingPathComponent:item];
+		NSString *entryName = base.length ? [base stringByAppendingPathComponent:item] : item;
+		BOOL isDir = NO;
+		[fm fileExistsAtPath:fullPath isDirectory:&isDir];
+		if (isDir) {
+			[self addDirEntry:entryName buf:buf entries:entries];
+			[self addDirectory:fullPath base:entryName buf:buf entries:entries];
+		} else {
+			[self addFile:fullPath entryName:entryName buf:buf entries:entries];
+		}
+	}
+}
+
++ (NSData *)zipPath:(NSString *)sourcePath {
+	NSFileManager *fm = [NSFileManager defaultManager];
+	NSMutableData *buf     = [NSMutableData data];
+	NSMutableArray *entries = [NSMutableArray array];
+
+	BOOL isDir = NO;
+	if (![fm fileExistsAtPath:sourcePath isDirectory:&isDir]) {
+		NSLog(@"[TapTap CloudSave] zipPath: not found: %@", sourcePath);
+		return nil;
+	}
+
+	if (isDir) {
+		[self addDirectory:sourcePath base:@"" buf:buf entries:entries];
+	} else {
+		[self addFile:sourcePath entryName:[sourcePath lastPathComponent] buf:buf entries:entries];
+	}
+
+	// Central directory
+	uint32_t cdOffset = (uint32_t)buf.length;
+	for (NSDictionary *e in entries) {
+		NSData *nameBytes = [e[@"name"] dataUsingEncoding:NSUTF8StringEncoding];
+		zip_write_le32(buf, kZipCDHSig);
+		zip_write_le16(buf, 20);  // version made
+		zip_write_le16(buf, 20);  // version needed
+		zip_write_le16(buf, 0);   // flags
+		zip_write_le16(buf, [e[@"compression"] unsignedShortValue]);
+		zip_write_le16(buf, 0);   // mod time
+		zip_write_le16(buf, 0);   // mod date
+		zip_write_le32(buf, [e[@"crc32"] unsignedIntValue]);
+		zip_write_le32(buf, [e[@"compressedSize"] unsignedIntValue]);
+		zip_write_le32(buf, [e[@"uncompSize"] unsignedIntValue]);
+		zip_write_le16(buf, (uint16_t)nameBytes.length);
+		zip_write_le16(buf, 0);   // extra len
+		zip_write_le16(buf, 0);   // comment len
+		zip_write_le16(buf, 0);   // disk start
+		zip_write_le16(buf, 0);   // internal attr
+		zip_write_le32(buf, [e[@"isDir"] boolValue] ? 0x10 : 0x20);  // external attr (dir/file)
+		zip_write_le32(buf, [e[@"offset"] unsignedIntValue]);
+		[buf appendData:nameBytes];
+	}
+
+	uint32_t cdSize  = (uint32_t)buf.length - cdOffset;
+	uint16_t count   = (uint16_t)entries.count;
+
+	// End of central directory
+	zip_write_le32(buf, kZipEOCDSig);
+	zip_write_le16(buf, 0);      // disk number
+	zip_write_le16(buf, 0);      // cd start disk
+	zip_write_le16(buf, count);  // entries on disk
+	zip_write_le16(buf, count);  // total entries
+	zip_write_le32(buf, cdSize);
+	zip_write_le32(buf, cdOffset);
+	zip_write_le16(buf, 0);      // comment len
+
+	return [NSData dataWithData:buf];
+}
+
++ (BOOL)unzipData:(NSData *)zipData toPath:(NSString *)destPath {
+	if (!zipData || zipData.length < 22) return NO;
+
+	const uint8_t *bytes = (const uint8_t *)zipData.bytes;
+	NSUInteger size = zipData.length;
+	NSFileManager *fm = [NSFileManager defaultManager];
+
+	// Find EOCD record (search from end)
+	NSUInteger eocdPos = NSNotFound;
+	for (NSInteger i = (NSInteger)size - 22; i >= 0; i--) {
+		if (zip_read_le32(bytes + i) == kZipEOCDSig) {
+			eocdPos = (NSUInteger)i;
+			break;
+		}
+	}
+	if (eocdPos == NSNotFound) {
+		NSLog(@"[TapTap CloudSave] unzip: EOCD not found");
+		return NO;
+	}
+
+	uint16_t totalEntries = zip_read_le16(bytes + eocdPos + 10);
+	uint32_t cdOffset     = zip_read_le32(bytes + eocdPos + 16);
+
+	[fm createDirectoryAtPath:destPath withIntermediateDirectories:YES attributes:nil error:nil];
+
+	NSUInteger pos = cdOffset;
+	for (int i = 0; i < totalEntries; i++) {
+		if (pos + 46 > size || zip_read_le32(bytes + pos) != kZipCDHSig) break;
+
+		uint16_t compression  = zip_read_le16(bytes + pos + 10);
+		uint32_t compSize     = zip_read_le32(bytes + pos + 20);
+		uint32_t uncompSize   = zip_read_le32(bytes + pos + 24);
+		uint16_t nameLen      = zip_read_le16(bytes + pos + 28);
+		uint16_t extraLen     = zip_read_le16(bytes + pos + 30);
+		uint16_t commentLen   = zip_read_le16(bytes + pos + 32);
+		uint32_t localOffset  = zip_read_le32(bytes + pos + 42);
+
+		NSString *entryName = [[NSString alloc] initWithBytes:bytes + pos + 46 length:nameLen encoding:NSUTF8StringEncoding];
+		if (!entryName) {
+			entryName = [[NSString alloc] initWithBytes:bytes + pos + 46 length:nameLen encoding:NSISOLatin1StringEncoding];
+		}
+		pos += 46 + nameLen + extraLen + commentLen;
+		if (!entryName) continue;
+
+		NSString *outPath = [destPath stringByAppendingPathComponent:entryName];
+
+		// Directory entry
+		if ([entryName hasSuffix:@"/"] || (compSize == 0 && uncompSize == 0)) {
+			[fm createDirectoryAtPath:outPath withIntermediateDirectories:YES attributes:nil error:nil];
+			continue;
+		}
+
+		// Ensure parent directory exists
+		[fm createDirectoryAtPath:[outPath stringByDeletingLastPathComponent]
+		  withIntermediateDirectories:YES attributes:nil error:nil];
+
+		// Locate actual data via local file header
+		if ((NSUInteger)localOffset + 30 > size) continue;
+		uint16_t lfhNameLen  = zip_read_le16(bytes + localOffset + 26);
+		uint16_t lfhExtraLen = zip_read_le16(bytes + localOffset + 28);
+		NSUInteger dataStart = (NSUInteger)localOffset + 30 + lfhNameLen + lfhExtraLen;
+		if (dataStart + compSize > size) continue;
+
+		const uint8_t *compData = bytes + dataStart;
+		NSData *fileData = nil;
+
+		if (compression == 0) {
+			fileData = [NSData dataWithBytes:compData length:compSize];
+		} else if (compression == 8) {
+			NSMutableData *inflated = [NSMutableData dataWithLength:uncompSize];
+			z_stream zs;
+			memset(&zs, 0, sizeof(zs));
+			inflateInit2(&zs, -15);
+			zs.next_in   = (Bytef *)compData;
+			zs.avail_in  = compSize;
+			zs.next_out  = (Bytef *)inflated.mutableBytes;
+			zs.avail_out = uncompSize;
+			int ret = inflate(&zs, Z_FINISH);
+			inflateEnd(&zs);
+			if (ret == Z_STREAM_END || ret == Z_OK) {
+				fileData = [NSData dataWithData:inflated];
+			}
+		}
+
+		if (fileData) {
+			[fileData writeToFile:outPath atomically:YES];
+		}
+	}
+	return YES;
+}
+
+@end
+
+// MARK: - Cloud Save Request Callback
+
+@interface GodotCloudSaveCallback : NSObject <TapTapCloudSaveRequestCallback>
+
+@property(nonatomic, copy) NSString *successSignal;
+@property(nonatomic, copy) NSString *errorSignal;
+@property(nonatomic, copy) NSString *localPath;    // used for download
+@property(nonatomic, copy) NSString *tempZipPath;  // temp file to delete after upload
+
+- (instancetype)initWithSuccess:(NSString *)success error:(NSString *)error localPath:(NSString *)localPath;
+- (instancetype)initWithSuccess:(NSString *)success error:(NSString *)error localPath:(NSString *)localPath tempZip:(NSString *)tempZip;
+
+@end
+
+@implementation GodotCloudSaveCallback
+
+- (instancetype)initWithSuccess:(NSString *)success error:(NSString *)error localPath:(NSString *)lp {
+	return [self initWithSuccess:success error:error localPath:lp tempZip:nil];
+}
+
+- (instancetype)initWithSuccess:(NSString *)success error:(NSString *)error localPath:(NSString *)lp tempZip:(NSString *)tz {
+	self = [super init];
+	if (self) {
+		_successSignal = success;
+		_errorSignal   = error;
+		_localPath     = lp;
+		_tempZipPath   = tz;
+	}
+	return self;
+}
+
+- (void)cleanupTempZip {
+	if (_tempZipPath && _tempZipPath.length > 0) {
+		[[NSFileManager defaultManager] removeItemAtPath:_tempZipPath error:nil];
+		_tempZipPath = nil;
+	}
+}
+
+- (NSString *)archiveToJSON:(ArchiveData *)archive {
+	NSDictionary *d = @{
+		@"uuid"         : archive.uuid ?: @"",
+		@"name"         : archive.name ?: @"",
+		@"summary"      : archive.summary ?: @"",
+		@"extra"        : archive.extra ?: @"",
+		@"playtime"     : @(archive.playtime),
+		@"fileId"       : archive.fileId ?: @"",
+		@"coverSize"    : @(archive.coverSize),
+		@"createdTime"  : @(archive.createdTime),
+		@"modifiedTime" : @(archive.modifiedTime),
+		@"saveSize"     : @(archive.saveSize)
+	};
+	NSData *jsonData = [NSJSONSerialization dataWithJSONObject:d options:0 error:nil];
+	return jsonData ? [[NSString alloc] initWithData:jsonData encoding:NSUTF8StringEncoding] : @"{}";
+}
+
+- (void)onArchiveCreatedWithArchive:(ArchiveData *)archive {
+	NSLog(@"[TapTap CloudSave] callback onArchiveCreated: uuid=%@, name=%@", archive.uuid, archive.name);
+	NSString *json = [self archiveToJSON:archive];
+	[self cleanupTempZip];
+	Godot3TapTap::get_singleton()->emit_signal(_successSignal.UTF8String, String::utf8(json.UTF8String));
+}
+
+- (void)onArchiveUpdatedWithArchive:(ArchiveData *)archive {
+	NSLog(@"[TapTap CloudSave] callback onArchiveUpdated: uuid=%@, name=%@", archive.uuid, archive.name);
+	NSString *json = [self archiveToJSON:archive];
+	[self cleanupTempZip];
+	Godot3TapTap::get_singleton()->emit_signal(_successSignal.UTF8String, String::utf8(json.UTF8String));
+}
+
+- (void)onArchiveDeletedWithArchive:(ArchiveData *)archive {
+	NSLog(@"[TapTap CloudSave] callback onArchiveDeleted: uuid=%@", archive.uuid);
+	NSString *json = [self archiveToJSON:archive];
+	Godot3TapTap::get_singleton()->emit_signal(_successSignal.UTF8String, String::utf8(json.UTF8String));
+}
+
+- (void)onArchiveListResultWithArchives:(NSArray<ArchiveData *> *)archives {
+	NSLog(@"[TapTap CloudSave] callback onArchiveListResult: count=%lu", (unsigned long)archives.count);
+	NSMutableArray *arr = [NSMutableArray array];
+	for (ArchiveData *a in archives) {
+		[arr addObject:@{
+			@"uuid"         : a.uuid ?: @"",
+			@"name"         : a.name ?: @"",
+			@"summary"      : a.summary ?: @"",
+			@"extra"        : a.extra ?: @"",
+			@"playtime"     : @(a.playtime),
+			@"fileId"       : a.fileId ?: @"",
+			@"coverSize"    : @(a.coverSize),
+			@"createdTime"  : @(a.createdTime),
+			@"modifiedTime" : @(a.modifiedTime),
+			@"saveSize"     : @(a.saveSize)
+		}];
+	}
+	NSDictionary *result = @{ @"archives": arr, @"count": @(arr.count) };
+	NSData *jsonData = [NSJSONSerialization dataWithJSONObject:result options:0 error:nil];
+	NSString *json = jsonData ? [[NSString alloc] initWithData:jsonData encoding:NSUTF8StringEncoding] : @"{\"archives\":[],\"count\":0}";
+	Godot3TapTap::get_singleton()->emit_signal(_successSignal.UTF8String, String::utf8(json.UTF8String));
+}
+
+- (void)onArchiveDataResultWithArchiveUUID:(NSString *)archiveUUID archiveFileID:(NSString *)archiveFileID data:(NSData *)data {
+	NSLog(@"[TapTap CloudSave] callback onArchiveDataResult: uuid=%@, fileID=%@, dataSize=%lu bytes", archiveUUID, archiveFileID, (unsigned long)data.length);
+	if (!_localPath || _localPath.length == 0) {
+		NSString *err = @"{\"error\":\"localPath not specified\"}";
+		Godot3TapTap::get_singleton()->emit_signal(_errorSignal.UTF8String, String::utf8(err.UTF8String));
+		return;
+	}
+
+	NSFileManager *fm = [NSFileManager defaultManager];
+	// Clean existing target
+	BOOL isDir = NO;
+	if ([fm fileExistsAtPath:_localPath isDirectory:&isDir]) {
+		if (isDir) {
+			NSArray *contents = [fm contentsOfDirectoryAtPath:_localPath error:nil];
+			for (NSString *item in contents) {
+				[fm removeItemAtPath:[_localPath stringByAppendingPathComponent:item] error:nil];
+			}
+		} else {
+			[fm removeItemAtPath:_localPath error:nil];
+		}
+	}
+
+	// Check if data is a standard ZIP (magic: PK\x03\x04)
+	const uint8_t zipMagic[4] = { 0x50, 0x4B, 0x03, 0x04 };
+	BOOL isZip = data.length >= 4 && memcmp(data.bytes, zipMagic, 4) == 0;
+	NSLog(@"[TapTap CloudSave] onArchiveDataResult: isZip=%@, destPath=%@", isZip ? @"YES" : @"NO", _localPath);
+	BOOL success = NO;
+
+	if (isZip) {
+		NSLog(@"[TapTap CloudSave] onArchiveDataResult: unzipping to %@", _localPath);
+		success = [GodotZipHelper unzipData:data toPath:_localPath];
+		NSLog(@"[TapTap CloudSave] onArchiveDataResult: unzip %@", success ? @"succeeded" : @"failed");
+	}
+	if (!success) {
+		// Not a zip or unzip failed — write raw data directly
+		NSLog(@"[TapTap CloudSave] onArchiveDataResult: writing raw data to %@", _localPath);
+		[fm createDirectoryAtPath:[_localPath stringByDeletingLastPathComponent]
+		  withIntermediateDirectories:YES attributes:nil error:nil];
+		success = [data writeToFile:_localPath atomically:YES];
+		NSLog(@"[TapTap CloudSave] onArchiveDataResult: raw write %@", success ? @"succeeded" : @"failed");
+	}
+
+	if (success) {
+		NSDictionary *result = @{ @"path": _localPath, @"size": @((uint32_t)data.length) };
+		NSData *jsonData = [NSJSONSerialization dataWithJSONObject:result options:0 error:nil];
+		NSString *json = jsonData ? [[NSString alloc] initWithData:jsonData encoding:NSUTF8StringEncoding] : @"{}";
+		Godot3TapTap::get_singleton()->emit_signal(_successSignal.UTF8String, String::utf8(json.UTF8String));
+	} else {
+		NSString *err = @"{\"error\":\"Failed to write archive data\"}";
+		Godot3TapTap::get_singleton()->emit_signal(_errorSignal.UTF8String, String::utf8(err.UTF8String));
+	}
+}
+
+- (void)onArchiveCoverResultWithArchiveUUID:(NSString *)archiveUUID archiveFileID:(NSString *)archiveFileID coverData:(NSData *)coverData {
+	NSLog(@"[TapTap CloudSave] callback onArchiveCoverResult: uuid=%@, fileID=%@, coverSize=%lu bytes", archiveUUID, archiveFileID, (unsigned long)coverData.length);
+	// Pass raw cover bytes as PoolByteArray
+	if (coverData && coverData.length > 0) {
+		PoolByteArray pba;
+		pba.resize((int)coverData.length);
+		PoolByteArray::Write w = pba.write();
+		memcpy(w.ptr(), coverData.bytes, coverData.length);
+		Godot3TapTap::get_singleton()->emit_signal(_successSignal.UTF8String, pba);
+	} else {
+		NSString *err = @"{\"error\":\"Empty cover data\"}";
+		Godot3TapTap::get_singleton()->emit_signal(_errorSignal.UTF8String, String::utf8(err.UTF8String));
+	}
+}
+
+- (void)onRequestErrorWithErrorCode:(NSInteger)errorCode errorMessage:(NSString *)errorMessage {
+	NSLog(@"[TapTap CloudSave] callback onRequestError: code=%ld, message=%@", (long)errorCode, errorMessage);
+	[self cleanupTempZip];
+	NSDictionary *errDict = @{ @"code": @(errorCode), @"message": errorMessage ?: @"" };
+	NSData *jsonData = [NSJSONSerialization dataWithJSONObject:errDict options:0 error:nil];
+	NSString *json = jsonData ? [[NSString alloc] initWithData:jsonData encoding:NSUTF8StringEncoding] : @"{\"error\":\"unknown\"}";
+	Godot3TapTap::get_singleton()->emit_signal(_errorSignal.UTF8String, String::utf8(json.UTF8String));
+}
+
+@end
+
 // MARK: - C++ Plugin Implementation
 
 Godot3TapTap *Godot3TapTap::instance = NULL;
@@ -366,6 +975,14 @@ void Godot3TapTap::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("showTip"), &Godot3TapTap::showTip);
 	ClassDB::bind_method(D_METHOD("restartApp"), &Godot3TapTap::restartApp);
 
+	// 云存档
+	ClassDB::bind_method(D_METHOD("createArchive"), &Godot3TapTap::createArchive);
+	ClassDB::bind_method(D_METHOD("getArchiveList"), &Godot3TapTap::getArchiveList);
+	ClassDB::bind_method(D_METHOD("downloadArchiveData"), &Godot3TapTap::downloadArchiveData);
+	ClassDB::bind_method(D_METHOD("updateArchive"), &Godot3TapTap::updateArchive);
+	ClassDB::bind_method(D_METHOD("deleteArchive"), &Godot3TapTap::deleteArchive);
+	ClassDB::bind_method(D_METHOD("getArchiveCover"), &Godot3TapTap::getArchiveCover);
+
 	// 信号（与 Android 版本完全一致）
 	ADD_SIGNAL(MethodInfo("onLoginSuccess"));
 	ADD_SIGNAL(MethodInfo("onLoginFail", PropertyInfo(Variant::STRING, "message")));
@@ -380,6 +997,21 @@ void Godot3TapTap::_bind_methods() {
 	ADD_SIGNAL(MethodInfo("onFinishPurchaseResponse", PropertyInfo(Variant::STRING, "jsonString")));
 	ADD_SIGNAL(MethodInfo("onQueryUnfinishedPurchaseResponse", PropertyInfo(Variant::STRING, "jsonString")));
 	ADD_SIGNAL(MethodInfo("onLaunchBillingFlowResult", PropertyInfo(Variant::STRING, "jsonString")));
+
+	// 云存档信号
+	ADD_SIGNAL(MethodInfo("onCloudSaveCallback", PropertyInfo(Variant::INT, "resultCode")));
+	ADD_SIGNAL(MethodInfo("onCreateArchiveSuccess", PropertyInfo(Variant::STRING, "jsonString")));
+	ADD_SIGNAL(MethodInfo("onCreateArchiveFailed", PropertyInfo(Variant::STRING, "jsonString")));
+	ADD_SIGNAL(MethodInfo("onGetArchiveListSuccess", PropertyInfo(Variant::STRING, "jsonString")));
+	ADD_SIGNAL(MethodInfo("onGetArchiveListFailed", PropertyInfo(Variant::STRING, "jsonString")));
+	ADD_SIGNAL(MethodInfo("onDownloadArchiveDataSuccess", PropertyInfo(Variant::STRING, "jsonString")));
+	ADD_SIGNAL(MethodInfo("onDownloadArchiveDataFailed", PropertyInfo(Variant::STRING, "jsonString")));
+	ADD_SIGNAL(MethodInfo("onUpdateArchiveSuccess", PropertyInfo(Variant::STRING, "jsonString")));
+	ADD_SIGNAL(MethodInfo("onUpdateArchiveFailed", PropertyInfo(Variant::STRING, "jsonString")));
+	ADD_SIGNAL(MethodInfo("onDeleteArchiveSuccess", PropertyInfo(Variant::STRING, "jsonString")));
+	ADD_SIGNAL(MethodInfo("onDeleteArchiveFailed", PropertyInfo(Variant::STRING, "jsonString")));
+	ADD_SIGNAL(MethodInfo("onGetArchiveCoverSuccess", PropertyInfo(Variant::POOL_BYTE_ARRAY, "coverData")));
+	ADD_SIGNAL(MethodInfo("onGetArchiveCoverFailed", PropertyInfo(Variant::STRING, "jsonString")));
 }
 
 // SDK 初始化
@@ -543,6 +1175,69 @@ void Godot3TapTap::showTip(const String &p_text) {
 
 void Godot3TapTap::restartApp() {
 	exit(0);
+}
+
+// MARK: - Cloud Save C++ Implementations
+
+static NSDictionary *dictionaryFromGodotDict(const Dictionary &d) {
+	NSMutableDictionary *result = [NSMutableDictionary dictionary];
+	Array keys = d.keys();
+	for (int i = 0; i < keys.size(); i++) {
+		String key = keys[i];
+		NSString *nsKey = [[NSString alloc] initWithUTF8String:key.utf8().get_data()];
+		Variant val = d[keys[i]];
+		if (val.get_type() == Variant::STRING) {
+			String sv = val;
+			result[nsKey] = [[NSString alloc] initWithUTF8String:sv.utf8().get_data()];
+		} else if (val.get_type() == Variant::INT) {
+			int64_t iv = val;
+			result[nsKey] = @(iv);
+		} else if (val.get_type() == Variant::REAL) {
+			double dv = val;
+			result[nsKey] = @(dv);
+		} else {
+			String sv = val;
+			result[nsKey] = [[NSString alloc] initWithUTF8String:sv.utf8().get_data()];
+		}
+	}
+	return [NSDictionary dictionaryWithDictionary:result];
+}
+
+void Godot3TapTap::createArchive(const Dictionary &p_metadata, const String &p_archive_file_path, const String &p_archive_cover_path) {
+	NSDictionary *meta = dictionaryFromGodotDict(p_metadata);
+	NSString *filePath  = [[NSString alloc] initWithUTF8String:p_archive_file_path.utf8().get_data()];
+	NSString *coverPath = [[NSString alloc] initWithUTF8String:p_archive_cover_path.utf8().get_data()];
+	[taptap_delegate createArchiveWithMetadata:meta filePath:filePath coverPath:coverPath];
+}
+
+void Godot3TapTap::getArchiveList() {
+	[taptap_delegate getArchiveList];
+}
+
+void Godot3TapTap::downloadArchiveData(const String &p_archive_uuid, const String &p_archive_file_id, const String &p_local_archive_path) {
+	NSString *uuid      = [[NSString alloc] initWithUTF8String:p_archive_uuid.utf8().get_data()];
+	NSString *fileID    = [[NSString alloc] initWithUTF8String:p_archive_file_id.utf8().get_data()];
+	NSString *localPath = [[NSString alloc] initWithUTF8String:p_local_archive_path.utf8().get_data()];
+	[taptap_delegate downloadArchiveTo:localPath archiveUUID:uuid fileID:fileID];
+}
+
+void Godot3TapTap::updateArchive(const String &p_archive_uuid, const Dictionary &p_metadata, const String &p_archive_file_path, const String &p_archive_cover_path) {
+	NSString *uuid      = [[NSString alloc] initWithUTF8String:p_archive_uuid.utf8().get_data()];
+	NSDictionary *meta  = dictionaryFromGodotDict(p_metadata);
+	NSString *filePath  = [[NSString alloc] initWithUTF8String:p_archive_file_path.utf8().get_data()];
+	NSString *coverPath = [[NSString alloc] initWithUTF8String:p_archive_cover_path.utf8().get_data()];
+	[taptap_delegate updateArchiveUUID:uuid metadata:meta filePath:filePath coverPath:coverPath];
+}
+
+void Godot3TapTap::deleteArchive(const String &p_archive_uuid) {
+	NSString *uuid = [[NSString alloc] initWithUTF8String:p_archive_uuid.utf8().get_data()];
+	[taptap_delegate deleteArchiveUUID:uuid];
+}
+
+void Godot3TapTap::getArchiveCover(const String &p_archive_uuid, const String &p_archive_file_id) {
+	NSString *uuid   = [[NSString alloc] initWithUTF8String:p_archive_uuid.utf8().get_data()];
+	NSString *fileID = [[NSString alloc] initWithUTF8String:p_archive_file_id.utf8().get_data()];
+	[taptap_delegate getArchiveCoverUUID:uuid fileID:fileID];
 }
 
 Godot3TapTap *Godot3TapTap::get_singleton() {

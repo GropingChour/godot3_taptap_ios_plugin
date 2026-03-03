@@ -15,7 +15,9 @@ linked=[
     "sdk/tapsdkcorecpp.xcframework",
     "sdk/TapTapSDKBridgeCore.xcframework",
     "sdk/TapTapLoginSDK.xcframework",
-    "sdk/TapTapComplianceSDK.xcframework"
+    "sdk/TapTapComplianceSDK.xcframework",
+    "sdk/TapTapCloudSaveSDK.xcframework",
+    "sdk/cloudsave_sdk.xcframework"
 ]
 embedded=[]
 system=["libz.1.tbd", "libc++.tbd"]

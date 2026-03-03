@@ -86,6 +86,14 @@ public:
 	void showTip(const String &p_text);
 	void restartApp();
 
+	// Cloud Save
+	void createArchive(const Dictionary &p_metadata, const String &p_archive_file_path, const String &p_archive_cover_path);
+	void getArchiveList();
+	void downloadArchiveData(const String &p_archive_uuid, const String &p_archive_file_id, const String &p_local_archive_path);
+	void updateArchive(const String &p_archive_uuid, const Dictionary &p_metadata, const String &p_archive_file_path, const String &p_archive_cover_path);
+	void deleteArchive(const String &p_archive_uuid);
+	void getArchiveCover(const String &p_archive_uuid, const String &p_archive_file_id);
+
 	static Godot3TapTap *get_singleton();
 
 	Godot3TapTap();
