@@ -33,11 +33,6 @@ typedef PackedStringArray GodotStringArray;
 typedef PoolStringArray GodotStringArray;
 #endif
 
-// MARK: - Forward declarations
-
-@class GodotZipHelper;
-@class GodotCloudSaveCallback;
-
 // MARK: - Objective-C Delegate
 
 @interface GodotTapTapDelegate : NSObject <TapTapComplianceDelegate, TapTapCloudSaveCallback>
@@ -235,140 +230,6 @@ typedef PoolStringArray GodotStringArray;
 - (void)complianceCallbackWithCode:(TapComplianceResultHandlerCode)code extra:(NSString *_Nullable)extra {
 	String info = String::utf8([extra UTF8String] ?: "");
 	Godot3TapTap::get_singleton()->emit_signal("onComplianceResult", (int)code, info);
-}
-
-// MARK: - Cloud Save delegate methods
-
-- (void)onResult:(NSInteger)resultCode {
-	NSLog(@"[TapTap CloudSave] onResult: resultCode=%ld", (long)resultCode);
-	Godot3TapTap::get_singleton()->emit_signal("onCloudSaveCallback", (int)resultCode);
-}
-
-- (ArchiveMetadata *)buildMetadata:(NSDictionary *)metadata {
-	NSString *name    = metadata[@"name"]    ?: @"";
-	NSString *summary = metadata[@"summary"] ?: @"";
-	NSString *extra   = metadata[@"extra"]   ?: @"";
-	int64_t  playtime = [metadata[@"playtime"] longLongValue];
-	return [[ArchiveMetadata alloc] initWithName:name summary:summary extra:extra playtime:playtime];
-}
-
-- (NSString *)zipAndGetPath:(NSString *)filePath tempSuffix:(NSString **)outTempPath {
-	NSFileManager *fm = [NSFileManager defaultManager];
-	BOOL isDir = NO;
-	if (![fm fileExistsAtPath:filePath isDirectory:&isDir]) {
-		NSLog(@"[TapTap CloudSave] zipAndGetPath: source path not found: %@", filePath);
-		return nil;
-	}
-	if (isDir) {
-		NSLog(@"[TapTap CloudSave] zipAndGetPath: compressing directory: %@", filePath);
-		NSString *tempZip = [filePath stringByAppendingString:@".cloudsave.tmp.zip"];
-		NSData *zipData = [GodotZipHelper zipPath:filePath];
-		if (!zipData) {
-			NSLog(@"[TapTap CloudSave] zipAndGetPath: failed to compress directory: %@", filePath);
-			return nil;
-		}
-		[zipData writeToFile:tempZip atomically:YES];
-		NSLog(@"[TapTap CloudSave] zipAndGetPath: zip written to: %@ (%lu bytes)", tempZip, (unsigned long)zipData.length);
-		if (outTempPath) *outTempPath = tempZip;
-		return tempZip;
-	}
-	NSLog(@"[TapTap CloudSave] zipAndGetPath: using file as-is: %@", filePath);
-	return filePath;
-}
-
-- (void)cleanupTempFile:(NSString *)tempPath {
-	if (tempPath && tempPath.length > 0) {
-		[[NSFileManager defaultManager] removeItemAtPath:tempPath error:nil];
-	}
-}
-
-- (void)createArchiveWithMetadata:(NSDictionary *)metadata filePath:(NSString *)filePath coverPath:(NSString *)coverPath {
-	NSLog(@"[TapTap CloudSave] createArchive: filePath=%@, coverPath=%@, metadata=%@", filePath, coverPath, metadata);
-	dispatch_async(dispatch_get_main_queue(), ^{
-		NSString *tempZip = nil;
-		NSString *actualPath = [self zipAndGetPath:filePath tempSuffix:&tempZip];
-		if (!actualPath) {
-			NSLog(@"[TapTap CloudSave] createArchive: file/zip failed, aborting");
-			Godot3TapTap::get_singleton()->emit_signal("onCreateArchiveFailed", String("{\"error\":\"File not found or zip failed\"}"));
-			return;
-		}
-		NSLog(@"[TapTap CloudSave] createArchive: uploading actualPath=%@", actualPath);
-		ArchiveMetadata *meta = [self buildMetadata:metadata];
-		NSString *coverArg = (coverPath && coverPath.length > 0) ? coverPath : nil;
-		GodotCloudSaveCallback *cb = [[GodotCloudSaveCallback alloc] initWithSuccess:@"onCreateArchiveSuccess"
-		                                                                       error:@"onCreateArchiveFailed"
-		                                                                   localPath:nil
-		                                                                     tempZip:tempZip];
-		[TapTapCloudSave createArchiveWithArchiveMetadata:meta
-		                                  archiveFilePath:actualPath
-		                                 archiveCoverPath:coverArg
-		                                         callback:cb];  // cleanup happens in callback
-	});
-}
-
-- (void)getArchiveList {
-	NSLog(@"[TapTap CloudSave] getArchiveList: requesting archive list");
-	dispatch_async(dispatch_get_main_queue(), ^{
-		GodotCloudSaveCallback *cb = [[GodotCloudSaveCallback alloc] initWithSuccess:@"onGetArchiveListSuccess"
-		                                                                       error:@"onGetArchiveListFailed"
-		                                                                   localPath:nil];
-		[TapTapCloudSave getArchiveListWithCallback:cb];
-	});
-}
-
-- (void)downloadArchiveTo:(NSString *)localPath archiveUUID:(NSString *)archiveUUID fileID:(NSString *)fileID {
-	NSLog(@"[TapTap CloudSave] downloadArchive: uuid=%@, fileID=%@, localPath=%@", archiveUUID, fileID, localPath);
-	dispatch_async(dispatch_get_main_queue(), ^{
-		GodotCloudSaveCallback *cb = [[GodotCloudSaveCallback alloc] initWithSuccess:@"onDownloadArchiveDataSuccess"
-		                                                                       error:@"onDownloadArchiveDataFailed"
-		                                                                   localPath:localPath];
-		[TapTapCloudSave getArchiveDataWithArchiveUUID:archiveUUID archiveFileID:fileID callback:cb];
-	});
-}
-
-- (void)updateArchiveUUID:(NSString *)archiveUUID metadata:(NSDictionary *)metadata filePath:(NSString *)filePath coverPath:(NSString *)coverPath {
-	NSLog(@"[TapTap CloudSave] updateArchive: uuid=%@, filePath=%@, coverPath=%@, metadata=%@", archiveUUID, filePath, coverPath, metadata);
-	dispatch_async(dispatch_get_main_queue(), ^{
-		NSString *tempZip = nil;
-		NSString *actualPath = [self zipAndGetPath:filePath tempSuffix:&tempZip];
-		if (!actualPath) {
-			NSLog(@"[TapTap CloudSave] updateArchive: file/zip failed, aborting");
-			Godot3TapTap::get_singleton()->emit_signal("onUpdateArchiveFailed", String("{\"error\":\"File not found or zip failed\"}"));
-			return;
-		}
-		NSLog(@"[TapTap CloudSave] updateArchive: uploading actualPath=%@", actualPath);
-		ArchiveMetadata *meta = [self buildMetadata:metadata];
-		NSString *coverArg = (coverPath && coverPath.length > 0) ? coverPath : nil;
-		GodotCloudSaveCallback *cb = [[GodotCloudSaveCallback alloc] initWithSuccess:@"onUpdateArchiveSuccess"
-		                                                                       error:@"onUpdateArchiveFailed"
-		                                                                   localPath:nil
-		                                                                     tempZip:tempZip];
-		[TapTapCloudSave updateArchiveWithArchiveUUID:archiveUUID
-		                              archiveMetadata:meta
-		                              archiveFilePath:actualPath
-		                             archiveCoverPath:coverArg
-		                                     callback:cb];  // cleanup happens in callback
-	});
-}
-
-- (void)deleteArchiveUUID:(NSString *)archiveUUID {
-	NSLog(@"[TapTap CloudSave] deleteArchive: uuid=%@", archiveUUID);
-	dispatch_async(dispatch_get_main_queue(), ^{
-		GodotCloudSaveCallback *cb = [[GodotCloudSaveCallback alloc] initWithSuccess:@"onDeleteArchiveSuccess"
-		                                                                       error:@"onDeleteArchiveFailed"
-		                                                                   localPath:nil];
-		[TapTapCloudSave deleteArchiveWithArchiveUUID:archiveUUID callback:cb];
-	});
-}
-
-- (void)getArchiveCoverUUID:(NSString *)archiveUUID fileID:(NSString *)fileID {
-	NSLog(@"[TapTap CloudSave] getArchiveCover: uuid=%@, fileID=%@", archiveUUID, fileID);
-	dispatch_async(dispatch_get_main_queue(), ^{
-		GodotCloudSaveCallback *cb = [[GodotCloudSaveCallback alloc] initWithSuccess:@"onGetArchiveCoverSuccess"
-		                                                                       error:@"onGetArchiveCoverFailed"
-		                                                                   localPath:nil];
-		[TapTapCloudSave getArchiveCoverWithArchiveUUID:archiveUUID archiveFileID:fileID callback:cb];
-	});
 }
 
 @end
@@ -941,6 +802,144 @@ static const uint32_t kZipEOCDSig = 0x06054b50U;
 	NSData *jsonData = [NSJSONSerialization dataWithJSONObject:errDict options:0 error:nil];
 	NSString *json = jsonData ? [[NSString alloc] initWithData:jsonData encoding:NSUTF8StringEncoding] : @"{\"error\":\"unknown\"}";
 	Godot3TapTap::get_singleton()->emit_signal(_errorSignal.UTF8String, String::utf8(json.UTF8String));
+}
+
+@end
+
+// MARK: - GodotTapTapDelegate Cloud Save (continuation — after GodotZipHelper & GodotCloudSaveCallback are fully defined)
+
+@implementation GodotTapTapDelegate (CloudSave)
+
+- (void)onResult:(NSInteger)resultCode {
+	NSLog(@"[TapTap CloudSave] onResult: resultCode=%ld", (long)resultCode);
+	Godot3TapTap::get_singleton()->emit_signal("onCloudSaveCallback", (int)resultCode);
+}
+
+- (ArchiveMetadata *)buildMetadata:(NSDictionary *)metadata {
+	NSString *name    = metadata[@"name"]    ?: @"";
+	NSString *summary = metadata[@"summary"] ?: @"";
+	NSString *extra   = metadata[@"extra"]   ?: @"";
+	int64_t  playtime = [metadata[@"playtime"] longLongValue];
+	return [[ArchiveMetadata alloc] initWithName:name summary:summary extra:extra playtime:playtime];
+}
+
+- (NSString *)zipAndGetPath:(NSString *)filePath tempSuffix:(NSString **)outTempPath {
+	NSFileManager *fm = [NSFileManager defaultManager];
+	BOOL isDir = NO;
+	if (![fm fileExistsAtPath:filePath isDirectory:&isDir]) {
+		NSLog(@"[TapTap CloudSave] zipAndGetPath: source path not found: %@", filePath);
+		return nil;
+	}
+	if (isDir) {
+		NSLog(@"[TapTap CloudSave] zipAndGetPath: compressing directory: %@", filePath);
+		NSString *tempZip = [filePath stringByAppendingString:@".cloudsave.tmp.zip"];
+		NSData *zipData = [GodotZipHelper zipPath:filePath];
+		if (!zipData) {
+			NSLog(@"[TapTap CloudSave] zipAndGetPath: failed to compress directory: %@", filePath);
+			return nil;
+		}
+		[zipData writeToFile:tempZip atomically:YES];
+		NSLog(@"[TapTap CloudSave] zipAndGetPath: zip written to: %@ (%lu bytes)", tempZip, (unsigned long)zipData.length);
+		if (outTempPath) *outTempPath = tempZip;
+		return tempZip;
+	}
+	NSLog(@"[TapTap CloudSave] zipAndGetPath: using file as-is: %@", filePath);
+	return filePath;
+}
+
+- (void)cleanupTempFile:(NSString *)tempPath {
+	if (tempPath && tempPath.length > 0) {
+		[[NSFileManager defaultManager] removeItemAtPath:tempPath error:nil];
+	}
+}
+
+- (void)createArchiveWithMetadata:(NSDictionary *)metadata filePath:(NSString *)filePath coverPath:(NSString *)coverPath {
+	NSLog(@"[TapTap CloudSave] createArchive: filePath=%@, coverPath=%@, metadata=%@", filePath, coverPath, metadata);
+	dispatch_async(dispatch_get_main_queue(), ^{
+		NSString *tempZip = nil;
+		NSString *actualPath = [self zipAndGetPath:filePath tempSuffix:&tempZip];
+		if (!actualPath) {
+			NSLog(@"[TapTap CloudSave] createArchive: file/zip failed, aborting");
+			Godot3TapTap::get_singleton()->emit_signal("onCreateArchiveFailed", String("{\"error\":\"File not found or zip failed\"}"));
+			return;
+		}
+		NSLog(@"[TapTap CloudSave] createArchive: uploading actualPath=%@", actualPath);
+		ArchiveMetadata *meta = [self buildMetadata:metadata];
+		NSString *coverArg = (coverPath && coverPath.length > 0) ? coverPath : nil;
+		GodotCloudSaveCallback *cb = [[GodotCloudSaveCallback alloc] initWithSuccess:@"onCreateArchiveSuccess"
+		                                                                       error:@"onCreateArchiveFailed"
+		                                                                   localPath:nil
+		                                                                     tempZip:tempZip];
+		[TapTapCloudSave createArchiveWithArchiveMetadata:meta
+		                                  archiveFilePath:actualPath
+		                                 archiveCoverPath:coverArg
+		                                         callback:cb];  // cleanup happens in callback
+	});
+}
+
+- (void)getArchiveList {
+	NSLog(@"[TapTap CloudSave] getArchiveList: requesting archive list");
+	dispatch_async(dispatch_get_main_queue(), ^{
+		GodotCloudSaveCallback *cb = [[GodotCloudSaveCallback alloc] initWithSuccess:@"onGetArchiveListSuccess"
+		                                                                       error:@"onGetArchiveListFailed"
+		                                                                   localPath:nil];
+		[TapTapCloudSave getArchiveListWithCallback:cb];
+	});
+}
+
+- (void)downloadArchiveTo:(NSString *)localPath archiveUUID:(NSString *)archiveUUID fileID:(NSString *)fileID {
+	NSLog(@"[TapTap CloudSave] downloadArchive: uuid=%@, fileID=%@, localPath=%@", archiveUUID, fileID, localPath);
+	dispatch_async(dispatch_get_main_queue(), ^{
+		GodotCloudSaveCallback *cb = [[GodotCloudSaveCallback alloc] initWithSuccess:@"onDownloadArchiveDataSuccess"
+		                                                                       error:@"onDownloadArchiveDataFailed"
+		                                                                   localPath:localPath];
+		[TapTapCloudSave getArchiveDataWithArchiveUUID:archiveUUID archiveFileID:fileID callback:cb];
+	});
+}
+
+- (void)updateArchiveUUID:(NSString *)archiveUUID metadata:(NSDictionary *)metadata filePath:(NSString *)filePath coverPath:(NSString *)coverPath {
+	NSLog(@"[TapTap CloudSave] updateArchive: uuid=%@, filePath=%@, coverPath=%@, metadata=%@", archiveUUID, filePath, coverPath, metadata);
+	dispatch_async(dispatch_get_main_queue(), ^{
+		NSString *tempZip = nil;
+		NSString *actualPath = [self zipAndGetPath:filePath tempSuffix:&tempZip];
+		if (!actualPath) {
+			NSLog(@"[TapTap CloudSave] updateArchive: file/zip failed, aborting");
+			Godot3TapTap::get_singleton()->emit_signal("onUpdateArchiveFailed", String("{\"error\":\"File not found or zip failed\"}"));
+			return;
+		}
+		NSLog(@"[TapTap CloudSave] updateArchive: uploading actualPath=%@", actualPath);
+		ArchiveMetadata *meta = [self buildMetadata:metadata];
+		NSString *coverArg = (coverPath && coverPath.length > 0) ? coverPath : nil;
+		GodotCloudSaveCallback *cb = [[GodotCloudSaveCallback alloc] initWithSuccess:@"onUpdateArchiveSuccess"
+		                                                                       error:@"onUpdateArchiveFailed"
+		                                                                   localPath:nil
+		                                                                     tempZip:tempZip];
+		[TapTapCloudSave updateArchiveWithArchiveUUID:archiveUUID
+		                              archiveMetadata:meta
+		                              archiveFilePath:actualPath
+		                             archiveCoverPath:coverArg
+		                                     callback:cb];  // cleanup happens in callback
+	});
+}
+
+- (void)deleteArchiveUUID:(NSString *)archiveUUID {
+	NSLog(@"[TapTap CloudSave] deleteArchive: uuid=%@", archiveUUID);
+	dispatch_async(dispatch_get_main_queue(), ^{
+		GodotCloudSaveCallback *cb = [[GodotCloudSaveCallback alloc] initWithSuccess:@"onDeleteArchiveSuccess"
+		                                                                       error:@"onDeleteArchiveFailed"
+		                                                                   localPath:nil];
+		[TapTapCloudSave deleteArchiveWithArchiveUUID:archiveUUID callback:cb];
+	});
+}
+
+- (void)getArchiveCoverUUID:(NSString *)archiveUUID fileID:(NSString *)fileID {
+	NSLog(@"[TapTap CloudSave] getArchiveCover: uuid=%@, fileID=%@", archiveUUID, fileID);
+	dispatch_async(dispatch_get_main_queue(), ^{
+		GodotCloudSaveCallback *cb = [[GodotCloudSaveCallback alloc] initWithSuccess:@"onGetArchiveCoverSuccess"
+		                                                                       error:@"onGetArchiveCoverFailed"
+		                                                                   localPath:nil];
+		[TapTapCloudSave getArchiveCoverWithArchiveUUID:archiveUUID archiveFileID:fileID callback:cb];
+	});
 }
 
 @end
