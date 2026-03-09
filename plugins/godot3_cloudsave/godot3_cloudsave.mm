@@ -86,82 +86,69 @@ Dictionary recordToDictionary(CKRecord *record) {
 }
 
 void Godot3CloudSave::createArchive(Dictionary metadata, String archiveFilePath, String archiveCoverPath) {
-    // Generate UUID
-    NSString *uuid = [[NSUUID UUID] UUIDString];
-    CKRecordID *recordID = [[CKRecordID alloc] initWithRecordName:uuid];
-    CKRecord *record = [[CKRecord alloc] initWithRecordType:@"GameArchive" recordID:recordID];
-    
-    // Set Metadata
-    // Note: metadata passed here is Dictionary, convert to JSON String for storage
-    // But wait, the argument `metadata` is Dictionary.
-    // TapTap expects JSON string or Dictionary? Usually it's better to store structured if possible, but for simplicity let's serialize to JSON string.
-    // However, Godot's Dictionary to JSON string helper is JSON::print(metadata).
-    // I can't easily access JSON::print here without including more headers using private APIs or core.
-    // For now, I will assume the caller passes a JSON String or I convert it simply if it's simple. 
-    // Actually, `metadata` in TapTap API description says: `metadata: Dictionary`.
-    // I don't have easy JSON serializer in this context without `core/io/json.h`.
-    // I'll assume metadata is small and convert it via Variant -> String (which might not correspond to JSON).
-    // Better strategy: ask GDScript to pass JSON string? No, keeping interface consistent means Dictionary.
-    // I'll use `Variant(metadata).to_json_string()` - wait, that's not available easily in 3.x C++ API exposed to modules without correct includes.
-    // I will use `String metadataStr = String(Variant(metadata));` which might produce Godot format string `{"key": "value"}` which is mostly JSON compatible but not strictly.
-    // Let's rely on GDScript layer to serialize metadata if needed, or just store it as is if it's String.
-    // The prompt says `metadata: Dictionary`.
-    // I'll assume for now I store it as String:
-    // String metaStr = String(Variant(metadata));
-    // And store in CloudKit as String.
-    
-    // Wait, TapTap's `createArchive` takes `metadata: Dictionary`.
-    // I will include `core/io/json.h` if possible, or just hack it.
-    // Actually, `Variant` has `to_json()` method or `JSON::print` static method.
-    
-    // For now, let's assume I can store it as string.
-    // However, the signature I defined takes `Dictionary`.
-    
-    // Error handling
-    
+    NSLog(@"[CloudSave] createArchive: start. filePath=%s coverPath=%s",
+          archiveFilePath.utf8().get_data(), archiveCoverPath.utf8().get_data());
+
     NSString *filePath = [NSString stringWithUTF8String:archiveFilePath.utf8()];
     if (![[NSFileManager defaultManager] fileExistsAtPath:filePath]) {
+        NSLog(@"[CloudSave] createArchive: ERROR - file not found at path: %@", filePath);
         Dictionary ret;
         ret["type"] = "create_archive_failed";
-        ret["msg"] = "File not found";
+        ret["msg"] = "File not found: " + archiveFilePath;
         _post_event(ret);
         return;
     }
-    
+
+    NSDictionary *fileAttrs = [[NSFileManager defaultManager] attributesOfItemAtPath:filePath error:nil];
+    NSLog(@"[CloudSave] createArchive: file found, size=%@ bytes", fileAttrs[NSFileSize]);
+
+    NSString *uuid = [[NSUUID UUID] UUIDString];
+    NSLog(@"[CloudSave] createArchive: generated UUID=%@", uuid);
+    CKRecordID *recordID = [[CKRecordID alloc] initWithRecordName:uuid];
+    CKRecord *record = [[CKRecord alloc] initWithRecordType:@"GameArchive" recordID:recordID];
+
     record[@"file"] = [[CKAsset alloc] initWithFileURL:[NSURL fileURLWithPath:filePath]];
-    
-    // Cover
+    NSLog(@"[CloudSave] createArchive: file asset attached");
+
     if (archiveCoverPath.length() > 0) {
         NSString *coverPath = [NSString stringWithUTF8String:archiveCoverPath.utf8()];
         if ([[NSFileManager defaultManager] fileExistsAtPath:coverPath]) {
             record[@"cover"] = [[CKAsset alloc] initWithFileURL:[NSURL fileURLWithPath:coverPath]];
+            NSLog(@"[CloudSave] createArchive: cover asset attached from %@", coverPath);
+        } else {
+            NSLog(@"[CloudSave] createArchive: WARNING - cover file not found at %@, skipping", coverPath);
         }
     }
-    
-    // Metadata (store as string representation of Dictionary)
-    // In Godot 3.x, Variant doesn't have `to_json_string`. `JSON::print(variant)` is used.
-    // Instead of including JSON here, I will just convert to String roughly.
-    // OR better, change the contract to String in GDScript wrapper.
-    // Let's try to include "core/io/json.h" to correspond to Godot source.
-    // But I'll skip and just use empty string if complex.
-    // For now: `String meta = String(Variant(metadata));`
-    
-   // record[@"metadata"] = [NSString stringWithUTF8String:String(Variant(metadata)).utf8()];
-   
-    // Set metadata on creation
-    // Converting Variant (Dictionary) to String for storage.
+
     String metaStr = String(Variant(metadata));
     record[@"metadata"] = [NSString stringWithUTF8String:metaStr.utf8()];
-    
-    CKContainer *container = [CKContainer defaultContainer];
-    CKDatabase *database = [container privateCloudDatabase];
-    
+    NSLog(@"[CloudSave] createArchive: metadata set: %s", metaStr.utf8().get_data());
+
+    CKContainer *container = nil;
+    CKDatabase *database = nil;
+    @try {
+        container = [CKContainer defaultContainer];
+        NSLog(@"[CloudSave] createArchive: container=%@", container.containerIdentifier);
+        database = [container privateCloudDatabase];
+    } @catch (NSException *exception) {
+        NSLog(@"[CloudSave] createArchive: ERROR - CloudKit exception: %@", exception.reason);
+        Dictionary ret;
+        ret["type"] = "create_archive_failed";
+        ret["msg"] = String("CloudKit disabled: ") + String([exception.reason UTF8String]);
+        _post_event(ret);
+        return;
+    }
+
+    NSLog(@"[CloudSave] createArchive: saving record to CloudKit...");
     [database saveRecord:record completionHandler:^(CKRecord *savedRecord, NSError *error) {
         Dictionary ret;
         if (error) {
+            NSLog(@"[CloudSave] createArchive: ERROR - save failed. code=%ld domain=%@ desc=%@",
+                  (long)error.code, error.domain, error.localizedDescription);
             ret["type"] = "create_archive_failed";
             ret["msg"] = String([error.localizedDescription UTF8String]);
         } else {
+            NSLog(@"[CloudSave] createArchive: SUCCESS - saved record=%@", savedRecord.recordID.recordName);
             ret["type"] = "create_archive_success";
             ret["data"] = recordToDictionary(savedRecord);
         }
@@ -170,21 +157,41 @@ void Godot3CloudSave::createArchive(Dictionary metadata, String archiveFilePath,
 }
 
 void Godot3CloudSave::getArchiveList() {
+    NSLog(@"[CloudSave] getArchiveList: start");
+
     NSPredicate *predicate = [NSPredicate predicateWithValue:YES];
     CKQuery *query = [[CKQuery alloc] initWithRecordType:@"GameArchive" predicate:predicate];
     query.sortDescriptors = @[[NSSortDescriptor sortDescriptorWithKey:@"modificationDate" ascending:NO]];
-    
-    CKContainer *container = [CKContainer defaultContainer];
-    CKDatabase *database = [container privateCloudDatabase];
-    
+
+    CKContainer *container = nil;
+    CKDatabase *database = nil;
+    @try {
+        container = [CKContainer defaultContainer];
+        NSLog(@"[CloudSave] getArchiveList: container=%@", container.containerIdentifier);
+        database = [container privateCloudDatabase];
+    } @catch (NSException *exception) {
+        NSLog(@"[CloudSave] getArchiveList: ERROR - CloudKit exception: %@", exception.reason);
+        Dictionary ret;
+        ret["type"] = "get_archive_list_failed";
+        ret["msg"] = String("CloudKit disabled: ") + String([exception.reason UTF8String]);
+        _post_event(ret);
+        return;
+    }
+
+    NSLog(@"[CloudSave] getArchiveList: executing query on GameArchive...");
     [database performQuery:query inZoneWithID:nil completionHandler:^(NSArray<CKRecord *> * _Nullable results, NSError * _Nullable error) {
         Dictionary ret;
         if (error) {
+            NSLog(@"[CloudSave] getArchiveList: ERROR - query failed. code=%ld domain=%@ desc=%@",
+                  (long)error.code, error.domain, error.localizedDescription);
             ret["type"] = "get_archive_list_failed";
             ret["msg"] = String([error.localizedDescription UTF8String]);
         } else {
+            NSLog(@"[CloudSave] getArchiveList: SUCCESS - found %lu records", (unsigned long)results.count);
             Array list;
             for (CKRecord *record in results) {
+                NSLog(@"[CloudSave] getArchiveList: record uuid=%@ modified=%@",
+                      record.recordID.recordName, record.modificationDate);
                 list.push_back(recordToDictionary(record));
             }
             Dictionary data;
@@ -197,41 +204,79 @@ void Godot3CloudSave::getArchiveList() {
 }
 
 void Godot3CloudSave::downloadArchiveData(String archiveUuid, String archiveFileId, String localArchivePath) {
+    NSLog(@"[CloudSave] downloadArchiveData: start. uuid=%s destPath=%s",
+          archiveUuid.utf8().get_data(), localArchivePath.utf8().get_data());
+
     NSString *uuid = [NSString stringWithUTF8String:archiveUuid.utf8()];
     CKRecordID *recordID = [[CKRecordID alloc] initWithRecordName:uuid];
-    
-    CKContainer *container = [CKContainer defaultContainer];
-    CKDatabase *database = [container privateCloudDatabase];
-    
+
+    CKContainer *container = nil;
+    CKDatabase *database = nil;
+    @try {
+        container = [CKContainer defaultContainer];
+        NSLog(@"[CloudSave] downloadArchiveData: container=%@", container.containerIdentifier);
+        database = [container privateCloudDatabase];
+    } @catch (NSException *exception) {
+        NSLog(@"[CloudSave] downloadArchiveData: ERROR - CloudKit exception: %@", exception.reason);
+        Dictionary ret;
+        ret["type"] = "download_archive_failed";
+        ret["msg"] = String("CloudKit disabled: ") + String([exception.reason UTF8String]);
+        ret["uuid"] = archiveUuid;
+        _post_event(ret);
+        return;
+    }
+
+    NSLog(@"[CloudSave] downloadArchiveData: fetching record for uuid=%@", uuid);
     [database fetchRecordWithID:recordID completionHandler:^(CKRecord * _Nullable record, NSError * _Nullable error) {
         Dictionary ret;
         if (error || !record) {
-            ret["type"] = "download_archive_failed"; // mapped to onDownloadArchiveDataFailed
+            NSLog(@"[CloudSave] downloadArchiveData: ERROR - fetch failed. code=%ld domain=%@ desc=%@",
+                  error ? (long)error.code : -1,
+                  error ? error.domain : @"N/A",
+                  error ? error.localizedDescription : @"Record not found");
+            ret["type"] = "download_archive_failed";
             ret["msg"] = String(error ? [error.localizedDescription UTF8String] : "Record not found");
             ret["uuid"] = archiveUuid;
         } else {
+            NSLog(@"[CloudSave] downloadArchiveData: record fetched, uuid=%@ modified=%@",
+                  record.recordID.recordName, record.modificationDate);
             CKAsset *asset = record[@"file"];
             if (asset && asset.fileURL) {
+                NSLog(@"[CloudSave] downloadArchiveData: file asset found at temp url=%@", asset.fileURL.path);
                 NSError *copyError = nil;
                 NSString *destPath = [NSString stringWithUTF8String:localArchivePath.utf8()];
                 NSFileManager *fm = [NSFileManager defaultManager];
-                
+
                 if ([fm fileExistsAtPath:destPath]) {
+                    NSLog(@"[CloudSave] downloadArchiveData: existing file at dest, removing...");
                     [fm removeItemAtPath:destPath error:nil];
                 }
-                
+
+                // Ensure destination directory exists
+                NSString *destDir = [destPath stringByDeletingLastPathComponent];
+                if (![fm fileExistsAtPath:destDir]) {
+                    [fm createDirectoryAtPath:destDir withIntermediateDirectories:YES attributes:nil error:nil];
+                    NSLog(@"[CloudSave] downloadArchiveData: created dest directory: %@", destDir);
+                }
+
+                NSLog(@"[CloudSave] downloadArchiveData: copying from %@ to %@", asset.fileURL.path, destPath);
                 [fm copyItemAtURL:asset.fileURL toURL:[NSURL fileURLWithPath:destPath] error:&copyError];
-                
+
                 if (copyError) {
+                    NSLog(@"[CloudSave] downloadArchiveData: ERROR - copy failed. code=%ld desc=%@",
+                          (long)copyError.code, copyError.localizedDescription);
                     ret["type"] = "download_archive_failed";
                     ret["msg"] = String([copyError.localizedDescription UTF8String]);
                     ret["uuid"] = archiveUuid;
                 } else {
+                    NSDictionary *destAttrs = [[NSFileManager defaultManager] attributesOfItemAtPath:destPath error:nil];
+                    NSLog(@"[CloudSave] downloadArchiveData: SUCCESS - file saved at %@, size=%@", destPath, destAttrs[NSFileSize]);
                     ret["type"] = "download_archive_success";
                     ret["uuid"] = archiveUuid;
                     ret["data"] = recordToDictionary(record);
                 }
             } else {
+                NSLog(@"[CloudSave] downloadArchiveData: ERROR - no file asset in record (asset=%@)", asset);
                 ret["type"] = "download_archive_failed";
                 ret["msg"] = "No file asset in record";
                 ret["uuid"] = archiveUuid;
@@ -242,74 +287,122 @@ void Godot3CloudSave::downloadArchiveData(String archiveUuid, String archiveFile
 }
 
 void Godot3CloudSave::updateArchive(String archiveUuid, Dictionary metadata, String archiveFilePath, String archiveCoverPath) {
+    NSLog(@"[CloudSave] updateArchive: start. uuid=%s filePath=%s",
+          archiveUuid.utf8().get_data(), archiveFilePath.utf8().get_data());
+
     NSString *uuid = [NSString stringWithUTF8String:archiveUuid.utf8()];
     CKRecordID *recordID = [[CKRecordID alloc] initWithRecordName:uuid];
-    
-    CKContainer *container = [CKContainer defaultContainer];
-    CKDatabase *database = [container privateCloudDatabase];
-    
+
+    CKContainer *container = nil;
+    CKDatabase *database = nil;
+    @try {
+        container = [CKContainer defaultContainer];
+        NSLog(@"[CloudSave] updateArchive: container=%@", container.containerIdentifier);
+        database = [container privateCloudDatabase];
+    } @catch (NSException *exception) {
+        NSLog(@"[CloudSave] updateArchive: ERROR - CloudKit exception: %@", exception.reason);
+        Dictionary ret;
+        ret["type"] = "update_archive_failed";
+        ret["msg"] = String("CloudKit disabled: ") + String([exception.reason UTF8String]);
+        _post_event(ret);
+        return;
+    }
+
+    NSLog(@"[CloudSave] updateArchive: fetching existing record uuid=%@...", uuid);
     [database fetchRecordWithID:recordID completionHandler:^(CKRecord * _Nullable record, NSError * _Nullable error) {
         if (error || !record) {
-             Dictionary ret;
-             ret["type"] = "update_archive_failed";
-             ret["msg"] = String(error ? [error.localizedDescription UTF8String] : "Record not found");
-             _post_event(ret);
-             return;
+            NSLog(@"[CloudSave] updateArchive: ERROR - fetch failed. code=%ld domain=%@ desc=%@",
+                  error ? (long)error.code : -1,
+                  error ? error.domain : @"N/A",
+                  error ? error.localizedDescription : @"Record not found");
+            Dictionary ret;
+            ret["type"] = "update_archive_failed";
+            ret["msg"] = String(error ? [error.localizedDescription UTF8String] : "Record not found");
+            _post_event(ret);
+            return;
         }
-        
-        // Update fields
+
+        NSLog(@"[CloudSave] updateArchive: record fetched, applying updates...");
+
         NSString *filePath = [NSString stringWithUTF8String:archiveFilePath.utf8()];
         if ([[NSFileManager defaultManager] fileExistsAtPath:filePath]) {
-             record[@"file"] = [[CKAsset alloc] initWithFileURL:[NSURL fileURLWithPath:filePath]];
+            NSDictionary *fileAttrs = [[NSFileManager defaultManager] attributesOfItemAtPath:filePath error:nil];
+            NSLog(@"[CloudSave] updateArchive: attaching new file asset, size=%@", fileAttrs[NSFileSize]);
+            record[@"file"] = [[CKAsset alloc] initWithFileURL:[NSURL fileURLWithPath:filePath]];
+        } else {
+            NSLog(@"[CloudSave] updateArchive: WARNING - file not found at %@, keeping existing", filePath);
         }
-        
+
         if (archiveCoverPath.length() > 0) {
             NSString *coverPath = [NSString stringWithUTF8String:archiveCoverPath.utf8()];
             if ([[NSFileManager defaultManager] fileExistsAtPath:coverPath]) {
                 record[@"cover"] = [[CKAsset alloc] initWithFileURL:[NSURL fileURLWithPath:coverPath]];
+                NSLog(@"[CloudSave] updateArchive: cover asset attached");
+            } else {
+                NSLog(@"[CloudSave] updateArchive: WARNING - cover not found at %@, skipping", coverPath);
             }
         }
-        
-        // Update metadata
-        // For simplicity, converting Variant to String. 
-        // Note: Ideally use JSON::print(metadata) to ensure JSON compatibility if game expects strict JSON.
+
         String metaStr = String(Variant(metadata));
         record[@"metadata"] = [NSString stringWithUTF8String:metaStr.utf8()];
-        
+        NSLog(@"[CloudSave] updateArchive: metadata updated: %s", metaStr.utf8().get_data());
+
         CKModifyRecordsOperation *op = [[CKModifyRecordsOperation alloc] initWithRecordsToSave:@[record] recordIDsToDelete:nil];
         op.savePolicy = CKRecordSaveIfServerRecordUnchanged;
-        
+        NSLog(@"[CloudSave] updateArchive: submitting CKModifyRecordsOperation...");
+
         op.modifyRecordsCompletionBlock = ^(NSArray<CKRecord *> * _Nullable savedRecords, NSArray<CKRecordID *> * _Nullable deletedRecordIDs, NSError * _Nullable operationError) {
-             Dictionary ret;
-             if (operationError) {
-                 ret["type"] = "update_archive_failed";
-                 ret["msg"] = String([operationError.localizedDescription UTF8String]);
-             } else {
-                 ret["type"] = "update_archive_success";
-                 if (savedRecords.count > 0) {
-                     ret["data"] = recordToDictionary(savedRecords[0]);
-                 }
-             }
-             _post_event(ret);
+            Dictionary ret;
+            if (operationError) {
+                NSLog(@"[CloudSave] updateArchive: ERROR - modify failed. code=%ld domain=%@ desc=%@",
+                      (long)operationError.code, operationError.domain, operationError.localizedDescription);
+                ret["type"] = "update_archive_failed";
+                ret["msg"] = String([operationError.localizedDescription UTF8String]);
+            } else {
+                NSLog(@"[CloudSave] updateArchive: SUCCESS - saved %lu records", (unsigned long)savedRecords.count);
+                ret["type"] = "update_archive_success";
+                if (savedRecords.count > 0) {
+                    ret["data"] = recordToDictionary(savedRecords[0]);
+                }
+            }
+            _post_event(ret);
         };
-        
+
         [database addOperation:op];
     }];
 }
 
 void Godot3CloudSave::deleteArchive(String archiveUuid) {
+    NSLog(@"[CloudSave] deleteArchive: start. uuid=%s", archiveUuid.utf8().get_data());
+
     NSString *uuid = [NSString stringWithUTF8String:archiveUuid.utf8()];
     CKRecordID *recordID = [[CKRecordID alloc] initWithRecordName:uuid];
-    
-    CKContainer *container = [CKContainer defaultContainer];
-    CKDatabase *database = [container privateCloudDatabase];
-    
-    [database deleteRecordWithID:recordID completionHandler:^(CKRecordID * _Nullable recordID, NSError * _Nullable error) {
+
+    CKContainer *container = nil;
+    CKDatabase *database = nil;
+    @try {
+        container = [CKContainer defaultContainer];
+        NSLog(@"[CloudSave] deleteArchive: container=%@", container.containerIdentifier);
+        database = [container privateCloudDatabase];
+    } @catch (NSException *exception) {
+        NSLog(@"[CloudSave] deleteArchive: ERROR - CloudKit exception: %@", exception.reason);
+        Dictionary ret;
+        ret["type"] = "delete_archive_failed";
+        ret["msg"] = String("CloudKit disabled: ") + String([exception.reason UTF8String]);
+        _post_event(ret);
+        return;
+    }
+
+    NSLog(@"[CloudSave] deleteArchive: deleting record uuid=%@...", uuid);
+    [database deleteRecordWithID:recordID completionHandler:^(CKRecordID * _Nullable deletedID, NSError * _Nullable error) {
         Dictionary ret;
         if (error) {
+            NSLog(@"[CloudSave] deleteArchive: ERROR - delete failed. code=%ld domain=%@ desc=%@",
+                  (long)error.code, error.domain, error.localizedDescription);
             ret["type"] = "delete_archive_failed";
             ret["msg"] = String([error.localizedDescription UTF8String]);
         } else {
+            NSLog(@"[CloudSave] deleteArchive: SUCCESS - deleted uuid=%@", deletedID.recordName);
             ret["type"] = "delete_archive_success";
             ret["uuid"] = archiveUuid;
         }
@@ -318,23 +411,44 @@ void Godot3CloudSave::deleteArchive(String archiveUuid) {
 }
 
 void Godot3CloudSave::getArchiveCover(String archiveUuid, String archiveFileId) {
+    NSLog(@"[CloudSave] getArchiveCover: start. uuid=%s", archiveUuid.utf8().get_data());
+
     NSString *uuid = [NSString stringWithUTF8String:archiveUuid.utf8()];
     CKRecordID *recordID = [[CKRecordID alloc] initWithRecordName:uuid];
-    
-    CKContainer *container = [CKContainer defaultContainer];
-    CKDatabase *database = [container privateCloudDatabase];
-    
-    // Fetch desired keys only
+
+    CKContainer *container = nil;
+    CKDatabase *database = nil;
+    @try {
+        container = [CKContainer defaultContainer];
+        NSLog(@"[CloudSave] getArchiveCover: container=%@", container.containerIdentifier);
+        database = [container privateCloudDatabase];
+    } @catch (NSException *exception) {
+        NSLog(@"[CloudSave] getArchiveCover: ERROR - CloudKit exception: %@", exception.reason);
+        Dictionary ret;
+        ret["type"] = "get_archive_cover_failed";
+        ret["msg"] = String("CloudKit disabled: ") + String([exception.reason UTF8String]);
+        _post_event(ret);
+        return;
+    }
+
+    NSLog(@"[CloudSave] getArchiveCover: fetching record uuid=%@...", uuid);
     [database fetchRecordWithID:recordID completionHandler:^(CKRecord * _Nullable record, NSError * _Nullable error) {
          Dictionary ret;
          if (error || !record) {
+             NSLog(@"[CloudSave] getArchiveCover: ERROR - fetch failed. code=%ld domain=%@ desc=%@",
+                   error ? (long)error.code : -1,
+                   error ? error.domain : @"N/A",
+                   error ? error.localizedDescription : @"Record not found");
              ret["type"] = "get_archive_cover_failed";
              ret["msg"] = String(error ? [error.localizedDescription UTF8String] : "Record not found");
          } else {
+             NSLog(@"[CloudSave] getArchiveCover: record fetched, checking cover asset...");
              CKAsset *coverAsset = record[@"cover"];
              if (coverAsset && coverAsset.fileURL) {
+                 NSLog(@"[CloudSave] getArchiveCover: cover asset found at %@", coverAsset.fileURL.path);
                  NSData *data = [NSData dataWithContentsOfURL:coverAsset.fileURL];
                  if (data) {
+                     NSLog(@"[CloudSave] getArchiveCover: SUCCESS - cover data loaded, size=%lu bytes", (unsigned long)data.length);
                      ret["type"] = "get_archive_cover_success";
                      
                      PoolByteArray pba;
@@ -345,10 +459,12 @@ void Godot3CloudSave::getArchiveCover(String archiveUuid, String archiveFileId) 
                      }
                      ret["data"] = pba;
                  } else {
+                     NSLog(@"[CloudSave] getArchiveCover: ERROR - cover asset URL exists but data is empty");
                      ret["type"] = "get_archive_cover_failed";
                      ret["msg"] = "Cover data empty";
                  }
              } else {
+                 NSLog(@"[CloudSave] getArchiveCover: ERROR - no cover asset in record (coverAsset=%@)", coverAsset);
                  ret["type"] = "get_archive_cover_failed";
                  ret["msg"] = "No cover asset";
              }
