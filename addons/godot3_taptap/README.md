@@ -11,8 +11,20 @@
 - **`TapTapConfigWindow.gd`** - Token 加密配置工具（GUI）
 - **`generate_secure_key.gd`** - 密钥生成工具（命令行）
 
+### 文档
+- **`CLOUDSAVE_USAGE.md`** - 云存档功能详细使用指南
+
 ### 示例文件
 - **`example_usage.gd`** - 使用示例代码
+
+## ✨ 功能特性
+
+- 🔐 **TapTap 登录** - 支持 TapTap 账号登录
+- ✅ **正版验证** - 游戏版权验证
+- 🎮 **DLC 管理** - DLC 商品查询和购买
+- 💰 **内购系统** - 完整的 IAP 支付流程
+- 📜 **合规认证** - 防沉迷系统集成
+- ☁️ **云存档** - 跨设备存档同步（新增）
 
 ## 🔧 工具使用方法
 
@@ -169,6 +181,7 @@ godot3_taptap/
 │   ├── taptap.gd                      # 主接口
 │   ├── TapTapConfigWindow.gd          # 配置工具
 │   ├── generate_secure_key.gd         # 密钥生成器
+│   ├── CLOUDSAVE_USAGE.md             # 云存档使用指南
 │   └── example_usage.gd               # 使用示例
 ├── android/build/res/raw/
 │   └── taptap_decrypt_key.txt         # 密钥文件
@@ -177,8 +190,59 @@ godot3_taptap/
 └── 📄 文档文件...
 ```
 
+## ☁️ 云存档功能
+
+TapTap 云存档功能已集成到本插件中，支持跨设备存档同步。
+
+### 快速使用
+
+```gdscript
+# 1. 初始化 SDK（确保已登录）
+TapTap.initSdkWithEncryptedToken("client_id", "encrypted_token", true)
+TapTap.login(true, false)
+
+# 2. 创建存档
+TapTap.createArchive(
+    "save_slot_1",           # 存档名称（仅英文/数字/下划线/中划线）
+    "关卡 10 - 1000分",       # 存档摘要（可使用中文）
+    "{}",                     # 额外信息
+    3600,                     # 游戏时长（秒）
+    "user://save.json",       # 存档文件路径
+    "user://cover.png"        # 封面路径（可选）
+)
+
+# 3. 获取存档列表
+TapTap.getArchiveList()
+
+# 4. 下载存档
+TapTap.getArchiveData(archive_uuid, file_id)
+
+# 5. 更新存档
+TapTap.updateArchive(archive_uuid, name, summary, extra, playtime, file_path, cover_path)
+
+# 6. 删除存档
+TapTap.deleteArchive(archive_uuid)
+```
+
+### 连接信号
+
+```gdscript
+TapTap.connect("onCreateArchiveSuccess", self, "_on_create_success")
+TapTap.connect("onGetArchiveListSuccess", self, "_on_list_loaded")
+TapTap.connect("onGetArchiveDataSuccess", self, "_on_data_downloaded")
+```
+
+### 详细文档
+
+查看 [CLOUDSAVE_USAGE.md](CLOUDSAVE_USAGE.md) 获取完整的云存档使用指南，包括：
+- 完整 API 说明
+- 错误处理指南
+- 最佳实践建议
+- 完整游戏流程示例
+
 ## 📄 相关文档
 
+- **`CLOUDSAVE_USAGE.md`** - 云存档功能详细使用指南（新增）
 - **`TapTap_Token加密配置指南_v2.md`** - 详细的使用指南
 - **`android/Android资源配置指南.md`** - Android 配置说明
 

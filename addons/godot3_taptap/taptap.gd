@@ -1,5 +1,6 @@
 extends Node
 
+#region 文档说明
 # TapTap SDK for Godot 3.x - GDScript封装层
 #
 # 这个脚本为 Godot 3.x 提供 TapTap SDK 的完整功能封装，包括：
@@ -8,6 +9,7 @@ extends Node
 # - DLC商品管理
 # - 内购(IAP)功能  
 # - 合规认证
+# - 云存档 (Cloud Save)
 #
 # 使用流程：
 # 1. 调用 initSdk() 或 initSdkWithEncryptedToken() 初始化SDK
@@ -29,7 +31,22 @@ extends Node
 # - onFinishPurchaseResponse: 完成订单结果
 # - onQueryUnfinishedPurchaseResponse: 未完成订单查询结果
 # - onLaunchBillingFlowResult: 启动购买流程结果
+# - onCloudSaveCallback: 云存档统一状态回调
+# - onCreateArchiveSuccess: 创建存档成功
+# - onCreateArchiveFailed: 创建存档失败
+# - onGetArchiveListSuccess: 获取存档列表成功
+# - onGetArchiveListFailed: 获取存档列表失败
+# - onDownloadArchiveDataSuccess: 下载并解压存档成功
+# - onDownloadArchiveDataFailed: 下载或解压存档失败
+# - onUpdateArchiveSuccess: 更新存档成功
+# - onUpdateArchiveFailed: 更新存档失败
+# - onDeleteArchiveSuccess: 删除存档成功
+# - onDeleteArchiveFailed: 删除存档失败
+# - onGetArchiveCoverSuccess: 获取存档封面成功
+# - onGetArchiveCoverFailed: 获取存档封面失败
+#endregion
 
+#region 枚举定义
 enum ComplianceMessage {
 	LOGIN_SUCCESS = 500, ## 玩家未受到限制，正常进入游戏
 	EXITED = 1000, ## 退出防沉迷认证及检查，当开发者调用 Exit 接口时或用户认证信息无效时触发，游戏应返回到登录页
@@ -41,6 +58,9 @@ enum ComplianceMessage {
 	REAL_NAME_STOP = 9002, ## 实名过程中点击了关闭实名窗，游戏可重新开始防沉迷认证
 }
 
+#endregion
+
+#region 类成员变量
 const PLUGIN_NAME := "Godot3TapTap"
 var singleton
 
@@ -54,6 +74,11 @@ var openId: int = -1
 
 var isReady: bool = false
 
+var lastErrorMessage: String = ""
+#endregion
+#endregion
+
+#region 基础工具方法
 func showTip(text: String):
 	# 显示Toast提示信息
 	#
@@ -87,12 +112,33 @@ func _ready():
 		singleton.connect("onFinishPurchaseResponse", self, "_onFinishPurchaseResponse")
 		singleton.connect("onQueryUnfinishedPurchaseResponse", self, "_onQueryUnfinishedPurchaseResponse")
 		singleton.connect("onLaunchBillingFlowResult", self, "_onLaunchBillingFlowResult")
+		# CloudSave 云存档相关信号
+		_connect_cloudsave_signal()
+		
 		print(PLUGIN_NAME, " ready")
 	else:
 		print(PLUGIN_NAME, " load fail")
 		
 	isReady = true
+	
+func _connect_cloudsave_signal():
+	if singleton.has_signal("onCloudSaveCallback"):
+		singleton.connect("onCloudSaveCallback", self, "_onCloudSaveCallback")
+		singleton.connect("onCreateArchiveSuccess", self, "_onCreateArchiveSuccess")
+		singleton.connect("onCreateArchiveFailed", self, "_onCreateArchiveFailed")
+		singleton.connect("onGetArchiveListSuccess", self, "_onGetArchiveListSuccess")
+		singleton.connect("onGetArchiveListFailed", self, "_onGetArchiveListFailed")
+		singleton.connect("onDownloadArchiveDataSuccess", self, "_onDownloadArchiveDataSuccess")
+		singleton.connect("onDownloadArchiveDataFailed", self, "_onDownloadArchiveDataFailed")
+		singleton.connect("onUpdateArchiveSuccess", self, "_onUpdateArchiveSuccess")
+		singleton.connect("onUpdateArchiveFailed", self, "_onUpdateArchiveFailed")
+		singleton.connect("onDeleteArchiveSuccess", self, "_onDeleteArchiveSuccess")
+		singleton.connect("onDeleteArchiveFailed", self, "_onDeleteArchiveFailed")
+		singleton.connect("onGetArchiveCoverSuccess", self, "_onGetArchiveCoverSuccess")
+		singleton.connect("onGetArchiveCoverFailed", self, "_onGetArchiveCoverFailed")
+#endregion
 
+#region SDK初始化
 func initSdk(clientId: String, clientToken: String, enableLog: bool = false, withIAP: bool = false) -> void:
 	# 初始化 TapTap SDK
 	#
@@ -115,7 +161,9 @@ func initSdkWithEncryptedToken(clientId: String, encryptedToken: String, enableL
 	#   enableLog: 是否启用日志，默认为 false
 	if not singleton: return
 	singleton.initSdkWithEncryptedToken(clientId, encryptedToken, enableLog, withIAP)
+#endregion
 
+#region 登录功能
 func login(useProfile: bool = false, useFriends: bool = false):
 	# TapTap 用户登录
 	#
@@ -158,8 +206,9 @@ func _onLoginCancel():
 signal onComplianceResult(code, info)
 func _onComplianceResult(code: int, info: String):
 	emit_signal("onComplianceResult", code, info)
+#endregion
 
-# ==================== 正版验证相关信号 ====================
+#region 正版验证相关信号
 
 signal onLicenseSuccess()
 func _onLicenseSuccess():
@@ -182,7 +231,9 @@ signal onDLCPurchaseResult(sku_id, status)
 func _onDLCPurchaseResult(skuId: String, status: int):
 	# DLC购买结果
 	emit_signal("onDLCPurchaseResult", skuId, status)
+#endregion
 
+#region 用户信息功能
 func isLogin() -> bool:
 	# 检查用户是否已登录
 	#
@@ -192,6 +243,7 @@ func isLogin() -> bool:
 	return singleton.isLogin()
 
 func loadUserInfo(loadAvatar: bool) -> GDScriptFunctionState:
+	print("loadUserInfo")
 	var needLoadName = userName.empty() or userName == DEFAULT_NAME
 	var needLoadAvatar = loadAvatar and not userAvatar
 	
@@ -255,13 +307,18 @@ func logoutThenRestart():
 	userAvatar = null
 	if not singleton: return
 	singleton.logoutThenRestart()
+#endregion
 
+#region 合规认证功能
 func compliance():
 	# 启动合规认证流程
 	#
 	# Triggers:
 	#   onComplianceResult: 合规认证结果，参数为合规状态码和详细信息
-	if not singleton: return
+	if not singleton: 
+		yield(get_tree(), "idle_frame")
+		emit_signal("onComplianceResult", ComplianceMessage.LOGIN_SUCCESS, "")
+		return
 	singleton.compliance()
 
 func complianceExit():
@@ -300,9 +357,9 @@ func httpDownloadAvatar(url: String):
 	texture.create_from_image(image)
 
 	userAvatar = texture
+#endregion
 
-# ==================== 版权验证相关方法 ====================
-
+#region 正版验证功能
 func checkLicense(forceCheck: bool = false):
 	# 检查游戏许可证
 	#
@@ -355,9 +412,9 @@ func purchaseDLC(skuId: String):
 	#       - DLC_RETURN_ERROR: 支付异常
 	if not singleton: return
 	singleton.purchaseDLC(skuId)
+#endregion
 
-# ==================== IAP 内购相关方法 ====================
-
+#region IAP内购功能
 func queryProductDetailsAsync(products: Array):
 	# 查询应用内商品详情
 	#
@@ -411,9 +468,9 @@ func queryUnfinishedPurchaseAsync():
 	#   onQueryUnfinishedPurchaseResponse: 未完成订单查询结果
 	if not singleton: return
 	singleton.queryUnfinishedPurchaseAsync()
+#endregion
 
-# ==================== IAP 信号处理 ====================
-
+#region IAP信号处理
 signal onProductDetailsResponse(response_data)
 func _onProductDetailsResponse(jsonString: String):
 	# 商品详情查询结果
@@ -458,11 +515,9 @@ func _onLaunchBillingFlowResult(jsonString: String):
 		emit_signal("onLaunchBillingFlowResult", json.result)
 	else:
 		emit_signal("onLaunchBillingFlowResult", {"error": json.error_string})
+#endregion
 
-# ==================== 工具方法 ====================
-
-# showTip 方法已经在文件开头定义了
-
+#region 工具方法
 func restartApp():
 	# 重启应用
 	#
@@ -477,9 +532,9 @@ func restartApp():
 	# 注意：此方法会立即终止当前进程，请确保在调用前已保存必要的数据。
 	if not singleton: return
 	singleton.restartApp()
+#endregion
 
-# ==================== 便利方法 ====================
-
+#region 便利方法
 func initAndVerifyLicense(clientId: String, clientToken: String, enableLog: bool = false, withIAP: bool = false):
 	# 便利方法：初始化SDK并立即进行正版验证
 	#
@@ -571,8 +626,9 @@ func _temp_on_product_details(response_data: Dictionary, product_id: String, ord
 		launchBillingFlow(product_id, order_id)
 	else:
 		showTip("商品不可用: " + product_id)
+#endregion
 
-# ==================== 使用示例 ====================
+#region 使用示例
 
 # 使用示例：
 #
@@ -642,3 +698,382 @@ func _temp_on_product_details(response_data: Dictionary, product_id: String, ord
 #
 # # 13. 合规认证（登录成功后调用）
 # TapTap.compliance()
+#endregion
+
+#region 云存档枚举定义
+enum CloudSaveResultCode {
+	NEED_LOGIN = 300001,  # 需要登录
+	INIT_FAILED = 300002  # 初始化失败，需要重新初始化
+}
+
+enum CloudSaveErrorCode {
+	INVALID_FILE_SIZE = 400000,  # 非法的存档文件/封面大小
+	UPLOAD_LIMIT = 400001,  # 存档上传频率超限
+	ARCHIVE_NOT_FOUND = 400002,  # 指定的存档不存在
+	ARCHIVE_COUNT_LIMIT = 400003,  # 单个应用下存档数量超限
+	APP_STORAGE_LIMIT = 400004,  # 单个应用下使用存储空间超限
+	TOTAL_STORAGE_LIMIT = 400005,  # 总使用存储空间超限
+	INVALID_TOKEN = 400006,  # 非法的操作令牌，通常是由于网络卡顿
+	CONCURRENT_CALL = 400007,  # 不允许并发调用
+	OSS_PROVIDER_NOT_FOUND = 400008,  # 找不到可用的 OSS 供应商
+	INVALID_ARCHIVE_NAME = 400009  # 存档名称不合法
+}
+#endregion
+
+#region 云存档信号定义
+signal onCloudSaveCallback(result_code)
+func _onCloudSaveCallback(resultCode: int):
+	# 云存档统一状态回调
+	emit_signal("onCloudSaveCallback", resultCode)
+
+signal onCreateArchiveSuccess(archive_data)
+	# 创建存档成功
+	# archive_data: Dictionary 包含存档信息：
+	#   - uuid: String - 存档UUID
+	#   - name: String - 存档名称
+	#   - summary: String - 存档摘要
+	#   - extra: String - 额外信息
+	#   - playtime: int - 游戏时长（秒）
+	#   - fileId: String - 文件ID
+	#   - coverSize: int - 封面大小（字节）
+	#   - createdTime: int - 创建时间戳
+	#   - modifiedTime: int - 修改时间戳
+	#   - saveSize: int - 存档大小（字节）
+func _onCreateArchiveSuccess(jsonString: String):
+	var json = JSON.parse(jsonString)
+	if json.error == OK:
+		emit_signal("onCreateArchiveSuccess", json.result)
+		emit_signal("onCreateArchiveCompleted", json.result, OK)
+	else:
+		emit_signal("onCreateArchiveSuccess", {"error": json.error_string})
+		emit_signal("onCreateArchiveCompleted", null, ERR_BUG)
+
+signal onCreateArchiveFailed(error_data)
+func _onCreateArchiveFailed(jsonString: String):
+	var json = JSON.parse(jsonString)
+	if json.error == OK:
+		lastErrorMessage = json.result.get("message", "未知错误")
+		emit_signal("onCreateArchiveFailed", json.result)
+		emit_signal("onCreateArchiveCompleted", null, ERR_BUG)
+	else:
+		lastErrorMessage = json.error_string
+		emit_signal("onCreateArchiveFailed", {"error": json.error_string})
+		emit_signal("onCreateArchiveCompleted", null, ERR_BUG)
+
+signal onCreateArchiveCompleted(result, err)
+
+signal onGetArchiveListSuccess(archives)
+	# 获取存档列表成功
+	# archives: Dictionary 包含存档列表信息：
+	#   - archives: Array - 存档数组，每个元素是一个存档 Dictionary：
+	#     - uuid: String - 存档UUID
+	#     - name: String - 存档名称
+	#     - summary: String - 存档摘要
+	#     - extra: String - 额外信息（JSON字符串）
+	#     - playtime: int - 游戏时长（秒）
+	#     - fileId: String - 文件ID
+	#     - coverSize: int - 封面大小（字节）
+	#     - createdTime: int - 创建时间戳（毫秒）
+	#     - modifiedTime: int - 修改时间戳（毫秒）
+	#     - saveSize: int - 存档大小（字节）
+	#   - count: int - 存档总数
+	#
+	# Example:
+	#   {
+	#     "archives": [
+	#       {
+	#         "uuid": "abc123",
+	#         "name": "save_slot_001",
+	#         "summary": "关卡 5",
+	#         "extra": "{\"level\": 5, \"timestamp\": 1234567890}",
+	#         "playtime": 3600,
+	#         "fileId": "file123",
+	#         "coverSize": 102400,
+	#         "createdTime": 1704614400000,
+	#         "modifiedTime": 1704614400000,
+	#         "saveSize": 1048576
+	#       }
+	#     ],
+	#     "count": 1
+	#   }
+func _onGetArchiveListSuccess(jsonString: String):
+	var json = JSON.parse(jsonString)
+	if json.error == OK:
+		emit_signal("onGetArchiveListSuccess", json.result)
+		emit_signal("onGetArchiveListCompleted", json.result, OK)
+	else:
+		emit_signal("onGetArchiveListSuccess", {"archives": [], "count": 0})
+		emit_signal("onGetArchiveListCompleted", {"archives": [], "count": 0}, OK)
+
+signal onGetArchiveListFailed(error_data)
+func _onGetArchiveListFailed(jsonString: String):
+	var json = JSON.parse(jsonString)
+	if json.error == OK:
+		lastErrorMessage = json.result.get("message", "未知错误")
+		emit_signal("onGetArchiveListFailed", json.result)
+		emit_signal("onGetArchiveListCompleted", null, ERR_BUG)
+	else:
+		lastErrorMessage = json.error_string
+		emit_signal("onGetArchiveListFailed", {"error": json.error_string})
+		emit_signal("onGetArchiveListCompleted", null, ERR_BUG)
+
+signal onGetArchiveListCompleted(result, err)
+
+signal onDownloadArchiveDataSuccess(archive_data)
+	# 下载并解压存档成功
+	# archive_data: Dictionary 包含存档信息：
+	#   - uuid: String - 存档UUID
+	#   - name: String - 存档名称
+	#   - summary: String - 存档摘要
+	#   - extra: String - 额外信息
+	#   - playtime: int - 游戏时长（秒）
+	#   - fileId: String - 文件ID
+	#   - coverSize: int - 封面大小（字节）
+	#   - createdTime: int - 创建时间戳
+	#   - modifiedTime: int - 修改时间戳
+	#   - saveSize: int - 存档大小（字节）
+func _onDownloadArchiveDataSuccess(jsonString: String):
+	var json = JSON.parse(jsonString)
+	if json.error == OK:
+		emit_signal("onDownloadArchiveDataSuccess", json.result)
+		emit_signal("onDownloadArchiveDataCompleted", json.result, OK)
+	else:
+		emit_signal("onDownloadArchiveDataSuccess", {"error": json.error_string})
+		emit_signal("onDownloadArchiveDataCompleted", null, ERR_BUG)
+
+signal onDownloadArchiveDataFailed(error_data)
+func _onDownloadArchiveDataFailed(jsonString: String):
+	var json = JSON.parse(jsonString)
+	if json.error == OK:
+		lastErrorMessage = json.result.get("error", "未知错误")
+		emit_signal("onDownloadArchiveDataFailed", json.result)
+		emit_signal("onDownloadArchiveDataCompleted", null, ERR_BUG)
+	else:
+		lastErrorMessage = json.error_string
+		emit_signal("onDownloadArchiveDataFailed", {"error": json.error_string})
+		emit_signal("onDownloadArchiveDataCompleted", null, ERR_BUG)
+
+signal onDownloadArchiveDataCompleted(result, err)
+
+signal onUpdateArchiveSuccess(archive_data)
+	# 更新存档成功
+	# archive_data: Dictionary 包含存档信息：
+	#   - uuid: String - 存档UUID
+	#   - name: String - 存档名称
+	#   - summary: String - 存档摘要
+	#   - extra: String - 额外信息
+	#   - playtime: int - 游戏时长（秒）
+	#   - fileId: String - 文件ID
+	#   - coverSize: int - 封面大小（字节）
+	#   - createdTime: int - 创建时间戳
+	#   - modifiedTime: int - 修改时间戳
+	#   - saveSize: int - 存档大小（字节）
+func _onUpdateArchiveSuccess(jsonString: String):
+	var json = JSON.parse(jsonString)
+	if json.error == OK:
+		emit_signal("onUpdateArchiveSuccess", json.result)
+		emit_signal("onUpdateArchiveCompleted", json.result, OK)
+	else:
+		emit_signal("onUpdateArchiveSuccess", {"error": json.error_string})
+		emit_signal("onUpdateArchiveCompleted", null, ERR_BUG)
+
+signal onUpdateArchiveFailed(error_data)
+func _onUpdateArchiveFailed(jsonString: String):
+	var json = JSON.parse(jsonString)
+	if json.error == OK:
+		lastErrorMessage = json.result.get("message", "未知错误")
+		emit_signal("onUpdateArchiveFailed", json.result)
+		emit_signal("onUpdateArchiveCompleted", null, ERR_BUG)
+	else:
+		lastErrorMessage = json.error_string
+		emit_signal("onUpdateArchiveFailed", {"error": json.error_string})
+		emit_signal("onUpdateArchiveCompleted", null, ERR_BUG)
+
+signal onUpdateArchiveCompleted(result, err)
+
+signal onDeleteArchiveSuccess(archive_data)
+	# 删除存档成功
+	# archive_data: Dictionary 包含存档信息：
+	#   - uuid: String - 存档UUID
+	#   - name: String - 存档名称
+	#   - summary: String - 存档摘要
+	#   - extra: String - 额外信息
+	#   - playtime: int - 游戏时长（秒）
+	#   - fileId: String - 文件ID
+	#   - coverSize: int - 封面大小（字节）
+	#   - createdTime: int - 创建时间戳
+	#   - modifiedTime: int - 修改时间戳
+	#   - saveSize: int - 存档大小（字节）
+func _onDeleteArchiveSuccess(jsonString: String):
+	var json = JSON.parse(jsonString)
+	if json.error == OK:
+		emit_signal("onDeleteArchiveSuccess", json.result)
+		emit_signal("onDeleteArchiveCompleted", json.result, OK)
+	else:
+		emit_signal("onDeleteArchiveSuccess", {"error": json.error_string})
+		emit_signal("onDeleteArchiveCompleted", null, ERR_BUG)
+
+signal onDeleteArchiveFailed(error_data)
+func _onDeleteArchiveFailed(jsonString: String):
+	var json = JSON.parse(jsonString)
+	if json.error == OK:
+		lastErrorMessage = json.result.get("message", "未知错误")
+		emit_signal("onDeleteArchiveFailed", json.result)
+		emit_signal("onDeleteArchiveCompleted", null, ERR_BUG)
+	else:
+		lastErrorMessage = json.error_string
+		emit_signal("onDeleteArchiveFailed", {"error": json.error_string})
+		emit_signal("onDeleteArchiveCompleted", null, ERR_BUG)
+
+signal onDeleteArchiveCompleted(result, err)
+
+signal onGetArchiveCoverSuccess(cover_data)
+func _onGetArchiveCoverSuccess(coverBytes: PoolByteArray):
+	# 封面数据直接以 byte[] 形式接收，不再使用 Base64 编码
+	emit_signal("onGetArchiveCoverSuccess", coverBytes)
+	emit_signal("onGetArchiveCoverCompleted", coverBytes, OK)
+
+signal onGetArchiveCoverFailed(error_data)
+func _onGetArchiveCoverFailed(jsonString: String):
+	var json = JSON.parse(jsonString)
+	if json.error == OK:
+		lastErrorMessage = json.result.get("message", "未知错误")
+		emit_signal("onGetArchiveCoverFailed", json.result)
+		emit_signal("onGetArchiveCoverCompleted", null, ERR_BUG)
+	else:
+		lastErrorMessage = json.error_string
+		emit_signal("onGetArchiveCoverFailed", {"error": json.error_string})
+		emit_signal("onGetArchiveCoverCompleted", null, ERR_BUG)
+
+signal onGetArchiveCoverCompleted(result, err)
+#endregion
+
+#region 云存档API方法
+
+func createArchive(metadata: Dictionary, archiveFilePath: String, archiveCoverPath: String = "") -> void:
+	# 创建游戏存档并上传云端
+	#
+	# 注意：
+	# - 存档名称仅支持【英文/数字/下划线/中划线】，不支持中文
+	# - 存档摘要 (summary) 以及额外信息 (extra) 无此限制
+	# - 一分钟内仅可调用一次（与更新存档共享冷却时间）
+	# - 单个存档文件大小不超过10MB
+	# - 封面大小不超过512KB
+	#
+	# Args:
+	#   metadata: 存档元数据 Dictionary，包含字段：
+	#     - name: 存档名称（必填，String）
+	#     - summary: 存档摘要/描述（可选，String）
+	#     - extra: 额外信息（可选，String）
+	#     - playtime: 游戏时长/秒（可选，int）
+	#   archiveFilePath: 存档文件路径
+	#   archiveCoverPath: 存档封面路径（可选）
+	#
+	# Example:
+	#   var metadata = {
+	#     "name": "save_slot_001",
+	#     "summary": "关卡 5",
+	#     "extra": '{"level": 5}',
+	#     "playtime": 3600
+	#   }
+	#   createArchive(metadata, "user://saves/slot1", "user://covers/slot1.png")
+	#
+	# Triggers:
+	#   onCreateArchiveSuccess: 创建成功
+	#   onCreateArchiveFailed: 创建失败
+	if not singleton: return
+	var globalizedFilePath = ProjectSettings.globalize_path(archiveFilePath)
+	var coverPath = archiveCoverPath if archiveCoverPath else ""
+	var globalizedCoverPath = ProjectSettings.globalize_path(coverPath) if coverPath else ""
+	singleton.createArchive(metadata, globalizedFilePath, globalizedCoverPath)
+
+func getArchiveList() -> void:
+	# 获取当前用户的存档列表
+	#
+	# Triggers:
+	#   onGetArchiveListSuccess: 获取成功，参数为存档列表数组
+	#   onGetArchiveListFailed: 获取失败
+	if not singleton: return
+	singleton.getArchiveList()
+
+func downloadArchiveData(archiveUuid: String, archiveFileId: String, localArchivePath: String) -> void:
+	# 下载存档并自动解压到本地路径（推荐使用）
+	#
+	# 此方法会下载云端存档，自动解压并覆盖本地指定路径的存档文件或目录
+	#
+	# Args:
+	#   archiveUuid: 存档UUID
+	#   archiveFileId: 存档文件ID
+	#   localArchivePath: 本地存档路径（文件或目录），使用 res:// 或 user:// 路径
+	#
+	# Triggers:
+	#   onDownloadArchiveDataSuccess: 下载并解压成功，参数为 {"path": String, "size": int}
+	#   onDownloadArchiveDataFailed: 下载或解压失败，参数为 {"error": String, "code": int}
+	if not singleton: return
+	var globalizedPath = ProjectSettings.globalize_path(localArchivePath)
+	singleton.downloadArchiveData(archiveUuid, archiveFileId, globalizedPath)
+
+func updateArchive(archiveUuid: String, metadata: Dictionary, archiveFilePath: String, 
+				   archiveCoverPath: String = "") -> void:
+	# 更新指定的存档文件
+	#
+	# 注意：
+	# - 存档名称仅支持【英文/数字/下划线/中划线】，不支持中文
+	# - 存档摘要 (summary) 以及额外信息 (extra) 无此限制
+	# - 一分钟内仅可调用一次（与创建存档共享冷却时间）
+	# - 单个存档文件大小不超过10MB
+	# - 封面大小不超过512KB
+	#
+	# Args:
+	#   archiveUuid: 存档UUID
+	#   metadata: 存档元数据 Dictionary，包含字段：
+	#     - name: 存档名称（必填，String）
+	#     - summary: 存档摘要/描述（可选，String）
+	#     - extra: 额外信息（可选，String）
+	#     - playtime: 游戏时长/秒（可选，int）
+	#   archiveFilePath: 新的存档文件路径
+	#   archiveCoverPath: 新的存档封面路径（可选）
+	#
+	# Example:
+	#   var metadata = {
+	#     "name": "save_slot_001",
+	#     "summary": "关卡 8",
+	#     "playtime": 7200
+	#   }
+	#   updateArchive(uuid, metadata, "user://saves/slot1", null)
+	#
+	# Triggers:
+	#   onUpdateArchiveSuccess: 更新成功
+	#   onUpdateArchiveFailed: 更新失败
+	if not singleton: return
+	var globalizedFilePath = ProjectSettings.globalize_path(archiveFilePath)
+	var coverPath = archiveCoverPath if archiveCoverPath else ""
+	var globalizedCoverPath = ProjectSettings.globalize_path(coverPath) if coverPath else ""
+	singleton.updateArchive(archiveUuid, metadata, globalizedFilePath, globalizedCoverPath)
+
+func deleteArchive(archiveUuid: String) -> void:
+	# 删除指定的存档文件
+	#
+	# Args:
+	#   archiveUuid: 存档UUID
+	#
+	# Triggers:
+	#   onDeleteArchiveSuccess: 删除成功
+	#   onDeleteArchiveFailed: 删除失败
+	if not singleton: return
+	singleton.deleteArchive(archiveUuid)
+
+func getArchiveCover(archiveUuid: String, archiveFileId: String) -> void:
+	# 获取指定存档的封面图片
+	#
+	# Args:
+	#   archiveUuid: 存档UUID
+	#   archiveFileId: 存档文件ID
+	#
+	# Triggers:
+	#   onGetArchiveCoverSuccess: 获取成功，参数包含Base64编码的封面数据
+	#   onGetArchiveCoverFailed: 获取失败
+	if not singleton: return
+	singleton.getArchiveCover(archiveUuid, archiveFileId)
+#endregion
+

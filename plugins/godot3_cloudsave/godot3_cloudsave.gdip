@@ -1,0 +1,8 @@
+[config]
+name="Godot3CloudSave"
+binary="godot3_cloudsave.a"
+initialization="register_godot3_cloudsave_types"
+deinitialization="unregister_godot3_cloudsave_types"
+
+[dependencies]
+linked=["CloudKit.framework"]
