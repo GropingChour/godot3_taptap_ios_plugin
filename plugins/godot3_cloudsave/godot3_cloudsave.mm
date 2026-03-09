@@ -405,6 +405,52 @@ void Godot3CloudSave::getArchiveList() {
                 _post_event(ret);
                 return;
             }
+            // CKErrorServerRejectedRequest (code=12) with "recordName is not marked queryable"
+            // can happen if server-side indexing/sorting is not fully configured.
+            // Fallback: query without sort descriptors, then sort records client-side by modificationDate.
+            if (error.code == 12 && [error.localizedDescription rangeOfString:@"recordName" options:NSCaseInsensitiveSearch].location != NSNotFound) {
+                NSLog(@"[CloudSave] getArchiveList: fallback to unsorted query (recordName not queryable)");
+                CKQuery *fallbackQuery = [[CKQuery alloc] initWithRecordType:@"GameArchive" predicate:[NSPredicate predicateWithValue:YES]];
+                CKQueryOperation *op = [[CKQueryOperation alloc] initWithQuery:fallbackQuery];
+                NSMutableArray<CKRecord *> *fetchedRecords = [NSMutableArray array];
+
+                op.recordFetchedBlock = ^(CKRecord * _Nonnull record) {
+                    [fetchedRecords addObject:record];
+                };
+
+                op.queryCompletionBlock = ^(CKQueryCursor * _Nullable cursor, NSError * _Nullable operationError) {
+                    Dictionary fallbackRet;
+                    if (operationError) {
+                        NSLog(@"[CloudSave] getArchiveList: fallback query ERROR - code=%ld domain=%@ desc=%@",
+                              (long)operationError.code, operationError.domain, operationError.localizedDescription);
+                        fallbackRet["type"] = "get_archive_list_failed";
+                        fallbackRet["msg"] = String([operationError.localizedDescription UTF8String]);
+                        _post_event(fallbackRet);
+                        return;
+                    }
+
+                    [fetchedRecords sortUsingComparator:^NSComparisonResult(CKRecord *a, CKRecord *b) {
+                        NSDate *ad = a.modificationDate ?: [NSDate distantPast];
+                        NSDate *bd = b.modificationDate ?: [NSDate distantPast];
+                        return [bd compare:ad];
+                    }];
+
+                    Array list;
+                    for (CKRecord *record in fetchedRecords) {
+                        list.push_back(recordToDictionary(record));
+                    }
+
+                    Dictionary data;
+                    data["list"] = list;
+                    fallbackRet["type"] = "get_archive_list_success";
+                    fallbackRet["data"] = data;
+                    NSLog(@"[CloudSave] getArchiveList: fallback SUCCESS - found %lu records", (unsigned long)fetchedRecords.count);
+                    _post_event(fallbackRet);
+                };
+
+                [database addOperation:op];
+                return;
+            }
             ret["type"] = "get_archive_list_failed";
             ret["msg"] = String([error.localizedDescription UTF8String]);
         } else {

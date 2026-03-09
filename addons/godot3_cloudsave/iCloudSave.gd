@@ -55,56 +55,73 @@ func _process(delta):
 		_dispatch_event(event)
 		count -= 1
 
+func _normalize_archive(raw: Dictionary) -> Dictionary:
+	var ret = raw.duplicate(true)
+	if not ret.has("uuid") and ret.has("archiveUuid"):
+		ret["uuid"] = ret["archiveUuid"]
+	if not ret.has("modifiedTime") and ret.has("updatedTime"):
+		ret["modifiedTime"] = ret["updatedTime"]
+	return ret
+
 func _dispatch_event(event: Dictionary):
 	var type = event.get("type", "")
 	var data = event.get("data", {}) 
 	var msg = event.get("msg", "")
 	var uuid = event.get("uuid", "")
+	var err_data = {"message": msg}
 	
 	match type:
 		"create_archive_success":
-			emit_signal("onCreateArchiveSuccess", JSON.print(data))
-			emit_signal("onCreateArchiveCompleted", data, OK)
+			var archive_data = _normalize_archive(data)
+			emit_signal("onCreateArchiveSuccess", archive_data)
+			emit_signal("onCreateArchiveCompleted", archive_data, OK)
 		"create_archive_failed":
-			emit_signal("onCreateArchiveFailed", msg)
-			emit_signal("onCreateArchiveCompleted", null, FAILED)
+			emit_signal("onCreateArchiveFailed", err_data)
+			emit_signal("onCreateArchiveCompleted", null, ERR_BUG)
 		
 		"get_archive_list_success":
-			# TapTap expects a JSON string containing the list?
-			emit_signal("onGetArchiveListSuccess", JSON.print(data))
-			emit_signal("onGetArchiveListCompleted", data.get("list", []), OK)
+			var list_raw = data.get("list", [])
+			var archives = []
+			for item in list_raw:
+				if item is Dictionary:
+					archives.append(_normalize_archive(item))
+			var list_data = {"archives": archives, "count": archives.size()}
+			emit_signal("onGetArchiveListSuccess", list_data)
+			emit_signal("onGetArchiveListCompleted", list_data, OK)
 		"get_archive_list_failed":
-			emit_signal("onGetArchiveListFailed", msg)
-			emit_signal("onGetArchiveListCompleted", [], FAILED)
+			emit_signal("onGetArchiveListFailed", err_data)
+			emit_signal("onGetArchiveListCompleted", null, ERR_BUG)
 			
 		"download_archive_success":
-			emit_signal("onDownloadArchiveDataSuccess", JSON.print(data))
-			emit_signal("onDownloadArchiveDataCompleted", data, OK)
+			var download_data = _normalize_archive(data)
+			emit_signal("onDownloadArchiveDataSuccess", download_data)
+			emit_signal("onDownloadArchiveDataCompleted", download_data, OK)
 		"download_archive_failed":
-			emit_signal("onDownloadArchiveDataFailed", msg)
-			emit_signal("onDownloadArchiveDataCompleted", null, FAILED)
+			emit_signal("onDownloadArchiveDataFailed", err_data)
+			emit_signal("onDownloadArchiveDataCompleted", null, ERR_BUG)
 			
 		"update_archive_success":
-			emit_signal("onUpdateArchiveSuccess", JSON.print(data))
-			emit_signal("onUpdateArchiveCompleted", data, OK)
+			var update_data = _normalize_archive(data)
+			emit_signal("onUpdateArchiveSuccess", update_data)
+			emit_signal("onUpdateArchiveCompleted", update_data, OK)
 		"update_archive_failed":
-			emit_signal("onUpdateArchiveFailed", msg)
-			emit_signal("onUpdateArchiveCompleted", null, FAILED)
+			emit_signal("onUpdateArchiveFailed", err_data)
+			emit_signal("onUpdateArchiveCompleted", null, ERR_BUG)
 			
 		"delete_archive_success":
-			var ret_data = {"archiveUuid": uuid}
-			emit_signal("onDeleteArchiveSuccess", JSON.print(ret_data))
+			var ret_data = {"archiveUuid": uuid, "uuid": uuid}
+			emit_signal("onDeleteArchiveSuccess", ret_data)
 			emit_signal("onDeleteArchiveCompleted", ret_data, OK)
 		"delete_archive_failed":
-			emit_signal("onDeleteArchiveFailed", msg)
-			emit_signal("onDeleteArchiveCompleted", null, FAILED)
+			emit_signal("onDeleteArchiveFailed", err_data)
+			emit_signal("onDeleteArchiveCompleted", null, ERR_BUG)
 			
 		"get_archive_cover_success":
 			emit_signal("onGetArchiveCoverSuccess", data) 
 			emit_signal("onGetArchiveCoverCompleted", data, OK)
 		"get_archive_cover_failed":
-			emit_signal("onGetArchiveCoverFailed", msg)
-			emit_signal("onGetArchiveCoverCompleted", null, FAILED)
+			emit_signal("onGetArchiveCoverFailed", err_data)
+			emit_signal("onGetArchiveCoverCompleted", null, ERR_BUG)
 
 #region Public API
 func createArchive(metadata: Dictionary, archiveFilePath: String, archiveCoverPath: String = "") -> void:
