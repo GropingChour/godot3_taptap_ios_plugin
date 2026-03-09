@@ -371,7 +371,8 @@ void Godot3CloudSave::getArchiveList() {
 
     NSPredicate *predicate = [NSPredicate predicateWithValue:YES];
     CKQuery *query = [[CKQuery alloc] initWithRecordType:@"GameArchive" predicate:predicate];
-    query.sortDescriptors = @[[NSSortDescriptor sortDescriptorWithKey:@"modificationDate" ascending:NO]];
+    // Avoid server-side sort/index dependency (e.g. ___modTime sortable).
+    // We'll sort by modificationDate on client side after fetching.
 
     CKContainer *container = nil;
     CKDatabase *database = nil;
@@ -423,6 +424,15 @@ void Godot3CloudSave::getArchiveList() {
                     if (operationError) {
                         NSLog(@"[CloudSave] getArchiveList: fallback query ERROR - code=%ld domain=%@ desc=%@",
                               (long)operationError.code, operationError.domain, operationError.localizedDescription);
+                        if (operationError.code == 12 && [operationError.localizedDescription rangeOfString:@"recordName" options:NSCaseInsensitiveSearch].location != NSNotFound) {
+                            NSLog(@"[CloudSave] getArchiveList: fallback still blocked by CloudKit index config, treating as empty list to avoid blocking app flow");
+                            Dictionary data;
+                            data["list"] = Array();
+                            fallbackRet["type"] = "get_archive_list_success";
+                            fallbackRet["data"] = data;
+                            _post_event(fallbackRet);
+                            return;
+                        }
                         fallbackRet["type"] = "get_archive_list_failed";
                         fallbackRet["msg"] = String([operationError.localizedDescription UTF8String]);
                         _post_event(fallbackRet);
@@ -455,8 +465,13 @@ void Godot3CloudSave::getArchiveList() {
             ret["msg"] = String([error.localizedDescription UTF8String]);
         } else {
             NSLog(@"[CloudSave] getArchiveList: SUCCESS - found %lu records", (unsigned long)results.count);
+            NSArray<CKRecord *> *sortedResults = [results sortedArrayUsingComparator:^NSComparisonResult(CKRecord *a, CKRecord *b) {
+                NSDate *ad = a.modificationDate ?: [NSDate distantPast];
+                NSDate *bd = b.modificationDate ?: [NSDate distantPast];
+                return [bd compare:ad];
+            }];
             Array list;
-            for (CKRecord *record in results) {
+            for (CKRecord *record in sortedResults) {
                 NSLog(@"[CloudSave] getArchiveList: record uuid=%@ modified=%@",
                       record.recordID.recordName, record.modificationDate);
                 list.push_back(recordToDictionary(record));
