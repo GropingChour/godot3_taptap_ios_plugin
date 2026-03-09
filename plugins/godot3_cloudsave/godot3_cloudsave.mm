@@ -145,7 +145,7 @@ static const uint32_t kCSZipEOCDSig = 0x06054b50U;
         if (pos + 46 > size) break;
         if (zip_read_le32(bytes + pos) != kCSZipCDHSig) break;
         uint16_t method   = zip_read_le16(bytes + pos + 10);
-        uint32_t crc      = zip_read_le32(bytes + pos + 16);
+        /* crc32 field skipped — not verified on decompress */
         uint32_t compSz   = zip_read_le32(bytes + pos + 20);
         uint32_t rawSz    = zip_read_le32(bytes + pos + 24);
         uint16_t nameLen  = zip_read_le16(bytes + pos + 28);
