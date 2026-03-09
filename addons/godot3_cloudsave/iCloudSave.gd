@@ -113,7 +113,7 @@ func createArchive(metadata: Dictionary, archiveFilePath: String, archiveCoverPa
 	var absCover = ""
 	if archiveCoverPath != "":
 		absCover = ProjectSettings.globalize_path(archiveCoverPath)
-	singleton.createArchive(metadata, absPath, absCover)
+	singleton.createArchive(JSON.print(metadata), absPath, absCover)
 
 func getArchiveList() -> void:
 	if not singleton: return
@@ -130,7 +130,7 @@ func updateArchive(archiveUuid: String, metadata: Dictionary, archiveFilePath: S
 	var absCover = ""
 	if archiveCoverPath != "":
 		absCover = ProjectSettings.globalize_path(archiveCoverPath)
-	singleton.updateArchive(archiveUuid, metadata, absPath, absCover)
+	singleton.updateArchive(archiveUuid, JSON.print(metadata), absPath, absCover)
 
 func deleteArchive(archiveUuid: String) -> void:
 	if not singleton: return

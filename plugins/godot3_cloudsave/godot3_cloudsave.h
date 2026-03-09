@@ -26,10 +26,10 @@ public:
     Variant pop_pending_event();
 
     // Cloud Save API
-    void createArchive(Dictionary metadata, String archiveFilePath, String archiveCoverPath);
+    void createArchive(String metadataJson, String archiveFilePath, String archiveCoverPath);
     void getArchiveList();
     void downloadArchiveData(String archiveUuid, String archiveFileId, String localArchivePath);
-    void updateArchive(String archiveUuid, Dictionary metadata, String archiveFilePath, String archiveCoverPath);
+    void updateArchive(String archiveUuid, String metadataJson, String archiveFilePath, String archiveCoverPath);
     void deleteArchive(String archiveUuid);
     void getArchiveCover(String archiveUuid, String archiveFileId);
 
