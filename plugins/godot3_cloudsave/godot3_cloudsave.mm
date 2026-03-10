@@ -411,7 +411,6 @@ static int _map_taptap_error_code(NSError *error, int default_code) {
         case CKErrorNetworkFailure:
         case CKErrorServiceUnavailable:
         case CKErrorOperationCancelled:
-        case CKErrorResultsTruncated:
         case CKErrorAssetFileNotFound:
         case CKErrorAssetFileModified:
             return 400006;
