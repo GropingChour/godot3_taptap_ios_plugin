@@ -5,6 +5,9 @@
 #include <zlib.h>
 #include <dirent.h>
 #include <sys/stat.h>
+#include <map>
+#include <mutex>
+#include <vector>
 
 #if VERSION_MAJOR == 4
 #import "platform/ios/app_delegate.h"
@@ -190,6 +193,137 @@ static const uint32_t kCSZipEOCDSig = 0x06054b50U;
 @end
 
 Godot3CloudSave *Godot3CloudSave::instance = NULL;
+
+static const uint64_t kRecentWriteCacheTTLMS = 30000;
+static std::map<std::string, Dictionary> g_recent_write_cache;
+static std::map<std::string, uint64_t> g_recent_write_cache_time;
+static std::mutex g_recent_write_cache_mutex;
+
+static uint64_t _now_ms() {
+    return (uint64_t)([[NSDate date] timeIntervalSince1970] * 1000.0);
+}
+
+static std::string _to_key(String p_uuid) {
+    return std::string(p_uuid.utf8().get_data());
+}
+
+static int _file_size_or_zero(NSString *path) {
+    if (!path || path.length == 0) return 0;
+    NSDictionary *attrs = [[NSFileManager defaultManager] attributesOfItemAtPath:path error:nil];
+    NSNumber *size = attrs[NSFileSize];
+    return size ? [size intValue] : 0;
+}
+
+static void _apply_metadata_to_archive_dict(NSString *metadata_json, Dictionary &dict) {
+    NSString *meta = metadata_json ?: @"{}";
+    dict["metadata"] = String([meta UTF8String]);
+
+    NSString *name = @"";
+    NSString *summary = @"";
+    NSString *extra = @"";
+    int64_t playtime = 0;
+
+    NSData *meta_data = [meta dataUsingEncoding:NSUTF8StringEncoding];
+    if (meta_data) {
+        id parsed = [NSJSONSerialization JSONObjectWithData:meta_data options:0 error:nil];
+        if ([parsed isKindOfClass:[NSDictionary class]]) {
+            NSDictionary *obj = (NSDictionary *)parsed;
+            id n = obj[@"name"];
+            id s = obj[@"summary"];
+            id e = obj[@"extra"];
+            id p = obj[@"playtime"];
+            if ([n isKindOfClass:[NSString class]]) name = (NSString *)n;
+            if ([s isKindOfClass:[NSString class]]) summary = (NSString *)s;
+            if ([e isKindOfClass:[NSString class]]) extra = (NSString *)e;
+            if ([p respondsToSelector:@selector(longLongValue)]) playtime = [p longLongValue];
+        }
+    }
+
+    dict["name"] = String([name UTF8String]);
+    dict["summary"] = String([summary UTF8String]);
+    dict["extra"] = String([extra UTF8String]);
+    dict["playtime"] = playtime;
+}
+
+static Dictionary _build_create_request_archive_dict(NSString *uuid, NSString *metadata_json, NSString *upload_file_path, NSString *cover_path) {
+    Dictionary dict;
+    uint64_t now_ms = _now_ms();
+
+    dict["uuid"] = String([uuid UTF8String]);
+    dict["archiveUuid"] = String([uuid UTF8String]);
+    dict["fileId"] = String([uuid UTF8String]);
+    dict["createdTime"] = now_ms;
+    dict["modifiedTime"] = now_ms;
+    dict["updatedTime"] = now_ms;
+    dict["saveSize"] = _file_size_or_zero(upload_file_path);
+    dict["coverSize"] = _file_size_or_zero(cover_path);
+
+    _apply_metadata_to_archive_dict(metadata_json, dict);
+    return dict;
+}
+
+static Dictionary _build_update_request_archive_dict(Dictionary base_dict, NSString *metadata_json, NSString *upload_file_path_or_nil, NSString *cover_path_or_nil) {
+    Dictionary dict = base_dict;
+    uint64_t now_ms = _now_ms();
+
+    dict["modifiedTime"] = now_ms;
+    dict["updatedTime"] = now_ms;
+
+    _apply_metadata_to_archive_dict(metadata_json, dict);
+
+    if (upload_file_path_or_nil && upload_file_path_or_nil.length > 0) {
+        dict["saveSize"] = _file_size_or_zero(upload_file_path_or_nil);
+    }
+    if (cover_path_or_nil && cover_path_or_nil.length > 0) {
+        dict["coverSize"] = _file_size_or_zero(cover_path_or_nil);
+    }
+
+    return dict;
+}
+
+static void _prune_recent_write_cache_locked() {
+    uint64_t now_ms = _now_ms();
+    std::vector<std::string> expired;
+    for (const auto &it : g_recent_write_cache_time) {
+        if (now_ms > it.second && now_ms - it.second > kRecentWriteCacheTTLMS) {
+            expired.push_back(it.first);
+        }
+    }
+    for (const auto &key : expired) {
+        g_recent_write_cache.erase(key);
+        g_recent_write_cache_time.erase(key);
+    }
+}
+
+static void _cache_recent_write(String uuid, Dictionary archive_dict) {
+    std::lock_guard<std::mutex> lock(g_recent_write_cache_mutex);
+    _prune_recent_write_cache_locked();
+    std::string key = _to_key(uuid);
+    g_recent_write_cache[key] = archive_dict;
+    g_recent_write_cache_time[key] = _now_ms();
+}
+
+static bool _get_recent_write(String uuid, Dictionary &out_archive_dict) {
+    std::lock_guard<std::mutex> lock(g_recent_write_cache_mutex);
+    _prune_recent_write_cache_locked();
+    std::string key = _to_key(uuid);
+    auto it = g_recent_write_cache.find(key);
+    if (it == g_recent_write_cache.end()) {
+        return false;
+    }
+    out_archive_dict = it->second;
+    return true;
+}
+
+static Array _get_all_recent_writes() {
+    std::lock_guard<std::mutex> lock(g_recent_write_cache_mutex);
+    _prune_recent_write_cache_locked();
+    Array list;
+    for (const auto &it : g_recent_write_cache) {
+        list.push_back(it.second);
+    }
+    return list;
+}
 
 Godot3CloudSave::Godot3CloudSave() {
     instance = this;
@@ -485,9 +619,11 @@ void Godot3CloudSave::createArchive(String metadataJson, String archiveFilePath,
     NSString *metaStr = [NSString stringWithUTF8String:metadataJson.utf8()];
     if (!metaStr || metaStr.length == 0) metaStr = @"{}";
 
+    NSString *coverPathForValidation = archiveCoverPath.length() > 0 ? [NSString stringWithUTF8String:archiveCoverPath.utf8()] : @"";
+    Dictionary requestArchiveData = _build_create_request_archive_dict(uuid, metaStr, uploadFilePath, coverPathForValidation);
+
     String validation_msg;
     int validation_code = 0;
-    NSString *coverPathForValidation = archiveCoverPath.length() > 0 ? [NSString stringWithUTF8String:archiveCoverPath.utf8()] : @"";
     if (!_validate_metadata_and_limits(metaStr, uploadFilePath, coverPathForValidation, validation_msg, validation_code)) {
         if (tempZipPath) {
             [[NSFileManager defaultManager] removeItemAtPath:tempZipPath error:nil];
@@ -538,6 +674,7 @@ void Godot3CloudSave::createArchive(String metadataJson, String archiveFilePath,
             NSLog(@"[CloudSave] createArchive: SUCCESS - saved record=%@", savedRecord.recordID.recordName);
             ret["type"] = "create_archive_success";
             ret["data"] = recordToDictionary(savedRecord);
+            _cache_recent_write(String([uuid UTF8String]), requestArchiveData);
         }
         _post_event(ret);
     }];
@@ -577,10 +714,12 @@ void Godot3CloudSave::getArchiveList() {
             // Treat this as an empty list rather than a failure.
             if (error.code == 11) {
                 NSLog(@"[CloudSave] getArchiveList: record type 'GameArchive' not found in schema - treating as empty list (first run)");
+                Array cached = _get_all_recent_writes();
+                Array list = cached.size() > 0 ? cached : Array();
                 Dictionary data;
-                data["list"] = Array();
-                data["archives"] = Array();
-                data["count"] = 0;
+                data["list"] = list;
+                data["archives"] = list;
+                data["count"] = list.size();
                 ret["type"] = "get_archive_list_success";
                 ret["data"] = data;
                 _post_event(ret);
@@ -606,10 +745,12 @@ void Godot3CloudSave::getArchiveList() {
                               (long)operationError.code, operationError.domain, operationError.localizedDescription);
                         if (operationError.code == 12 && [operationError.localizedDescription rangeOfString:@"recordName" options:NSCaseInsensitiveSearch].location != NSNotFound) {
                             NSLog(@"[CloudSave] getArchiveList: fallback still blocked by CloudKit index config, treating as empty list to avoid blocking app flow");
+                            Array cached = _get_all_recent_writes();
+                            Array list = cached.size() > 0 ? cached : Array();
                             Dictionary data;
-                            data["list"] = Array();
-                            data["archives"] = Array();
-                            data["count"] = 0;
+                            data["list"] = list;
+                            data["archives"] = list;
+                            data["count"] = list.size();
                             fallbackRet["type"] = "get_archive_list_success";
                             fallbackRet["data"] = data;
                             _post_event(fallbackRet);
@@ -631,6 +772,26 @@ void Godot3CloudSave::getArchiveList() {
                     Array list;
                     for (CKRecord *record in fetchedRecords) {
                         list.push_back(recordToDictionary(record));
+                    }
+
+                    if (list.size() == 0) {
+                        Array cached = _get_all_recent_writes();
+                        if (cached.size() > 0) {
+                            NSLog(@"[CloudSave] getArchiveList: using %d cached recent write records for empty query result", cached.size());
+                            list = cached;
+                        }
+                    } else {
+                        for (int i = 0; i < list.size(); i++) {
+                            Dictionary item = list[i];
+                            String item_uuid = item.has("uuid") ? (String)item["uuid"] : "";
+                            if (item_uuid.length() == 0) {
+                                item_uuid = item.has("archiveUuid") ? (String)item["archiveUuid"] : "";
+                            }
+                            Dictionary cached_item;
+                            if (item_uuid.length() > 0 && _get_recent_write(item_uuid, cached_item)) {
+                                list.set(i, cached_item);
+                            }
+                        }
                     }
 
                     Dictionary data;
@@ -662,6 +823,27 @@ void Godot3CloudSave::getArchiveList() {
                       record.recordID.recordName, record.modificationDate);
                 list.push_back(recordToDictionary(record));
             }
+
+            if (list.size() == 0) {
+                Array cached = _get_all_recent_writes();
+                if (cached.size() > 0) {
+                    NSLog(@"[CloudSave] getArchiveList: using %d cached recent write records for empty query result", cached.size());
+                    list = cached;
+                }
+            } else {
+                for (int i = 0; i < list.size(); i++) {
+                    Dictionary item = list[i];
+                    String item_uuid = item.has("uuid") ? (String)item["uuid"] : "";
+                    if (item_uuid.length() == 0) {
+                        item_uuid = item.has("archiveUuid") ? (String)item["archiveUuid"] : "";
+                    }
+                    Dictionary cached_item;
+                    if (item_uuid.length() > 0 && _get_recent_write(item_uuid, cached_item)) {
+                        list.set(i, cached_item);
+                    }
+                }
+            }
+
             Dictionary data;
             data["list"] = list;
             data["archives"] = list;
@@ -875,6 +1057,13 @@ void Godot3CloudSave::updateArchive(String archiveUuid, String metadataJson, Str
         NSString *metaStr = [NSString stringWithUTF8String:metadataJson.utf8()];
         if (!metaStr || metaStr.length == 0) metaStr = @"{}";
 
+        Dictionary requestArchiveData = _build_update_request_archive_dict(
+            recordToDictionary(record),
+            metaStr,
+            fileExists ? (isDir ? tempZipPath : filePath) : nil,
+            (archiveCoverPath.length() > 0) ? [NSString stringWithUTF8String:archiveCoverPath.utf8()] : nil
+        );
+
         String validation_msg;
         int validation_code = 0;
         NSString *coverPathForValidation = archiveCoverPath.length() > 0 ? [NSString stringWithUTF8String:archiveCoverPath.utf8()] : @"";
@@ -919,6 +1108,7 @@ void Godot3CloudSave::updateArchive(String archiveUuid, String metadataJson, Str
                 if (savedRecords.count > 0) {
                     ret["data"] = recordToDictionary(savedRecords[0]);
                 }
+                _cache_recent_write(archiveUuid, requestArchiveData);
             }
             _post_event(ret);
         };
