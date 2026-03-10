@@ -238,16 +238,65 @@ bool Godot3CloudSave::isAvailable() {
 // Helpers
 Dictionary recordToDictionary(CKRecord *record) {
     Dictionary dict;
-    dict["archiveUuid"] = String([record.recordID.recordName UTF8String]);
-    dict["updatedTime"] = (uint64_t)([record.modificationDate timeIntervalSince1970] * 1000);
-    
+    NSString *uuid = record.recordID.recordName ?: @"";
+    dict["uuid"] = String([uuid UTF8String]);
+    dict["archiveUuid"] = String([uuid UTF8String]);
+
+    uint64_t createdTime = record.creationDate ? (uint64_t)([record.creationDate timeIntervalSince1970] * 1000) : 0;
+    uint64_t modifiedTime = record.modificationDate ? (uint64_t)([record.modificationDate timeIntervalSince1970] * 1000) : createdTime;
+    dict["createdTime"] = createdTime;
+    dict["modifiedTime"] = modifiedTime;
+    dict["updatedTime"] = modifiedTime;
+
+    NSString *name = @"";
+    NSString *summary = @"";
+    NSString *extra = @"";
+    int64_t playtime = 0;
+
     NSString *metadataStr = record[@"metadata"];
     if (metadataStr) {
         dict["metadata"] = String([metadataStr UTF8String]);
+        NSData *metadataData = [metadataStr dataUsingEncoding:NSUTF8StringEncoding];
+        NSDictionary *metadataObj = nil;
+        if (metadataData) {
+            id parsed = [NSJSONSerialization JSONObjectWithData:metadataData options:0 error:nil];
+            if ([parsed isKindOfClass:[NSDictionary class]]) {
+                metadataObj = (NSDictionary *)parsed;
+            }
+        }
+        if (metadataObj) {
+            id n = metadataObj[@"name"];
+            id s = metadataObj[@"summary"];
+            id e = metadataObj[@"extra"];
+            id p = metadataObj[@"playtime"];
+            if ([n isKindOfClass:[NSString class]]) name = (NSString *)n;
+            if ([s isKindOfClass:[NSString class]]) summary = (NSString *)s;
+            if ([e isKindOfClass:[NSString class]]) extra = (NSString *)e;
+            if ([p respondsToSelector:@selector(longLongValue)]) playtime = [p longLongValue];
+        }
     } else {
         dict["metadata"] = "";
     }
-    
+
+    dict["name"] = String([name UTF8String]);
+    dict["summary"] = String([summary UTF8String]);
+    dict["extra"] = String([extra UTF8String]);
+    dict["playtime"] = playtime;
+
+    // CloudKit has no separate fileId concept for this custom record, use UUID for compatibility.
+    dict["fileId"] = String([uuid UTF8String]);
+
+    int coverSize = 0;
+    CKAsset *coverAsset = record[@"cover"];
+    if (coverAsset && coverAsset.fileURL) {
+        NSNumber *coverSizeValue = nil;
+        [coverAsset.fileURL getResourceValue:&coverSizeValue forKey:NSURLFileSizeKey error:nil];
+        if (coverSizeValue) {
+            coverSize = [coverSizeValue intValue];
+        }
+    }
+    dict["coverSize"] = coverSize;
+
     CKAsset *fileAsset = record[@"file"];
     if (fileAsset && fileAsset.fileURL) {
          NSNumber *fileSizeValue = nil;
@@ -263,6 +312,115 @@ Dictionary recordToDictionary(CKRecord *record) {
     return dict;
 }
 
+static bool _validate_metadata_and_limits(NSString *metadataJson,
+                                          NSString *archiveFilePath,
+                                          NSString *archiveCoverPath,
+                                          String &out_msg,
+                                          int &out_code) {
+    out_msg = "";
+    out_code = 0;
+
+    NSString *metaStr = metadataJson ?: @"{}";
+    NSData *metaData = [metaStr dataUsingEncoding:NSUTF8StringEncoding];
+    NSDictionary *metaObj = nil;
+    if (metaData) {
+        id parsed = [NSJSONSerialization JSONObjectWithData:metaData options:0 error:nil];
+        if ([parsed isKindOfClass:[NSDictionary class]]) {
+            metaObj = (NSDictionary *)parsed;
+        }
+    }
+    if (!metaObj) {
+        out_code = 400009;
+        out_msg = "Invalid metadata JSON";
+        return false;
+    }
+
+    NSString *name = [metaObj[@"name"] isKindOfClass:[NSString class]] ? metaObj[@"name"] : @"";
+    NSString *summary = [metaObj[@"summary"] isKindOfClass:[NSString class]] ? metaObj[@"summary"] : @"";
+    NSRegularExpression *re = [NSRegularExpression regularExpressionWithPattern:@"^[A-Za-z0-9_-]+$" options:0 error:nil];
+    NSUInteger nameMatches = [re numberOfMatchesInString:name options:0 range:NSMakeRange(0, name.length)];
+    if (name.length == 0 || nameMatches == 0) {
+        out_code = 400009;
+        out_msg = "Invalid archive name";
+        return false;
+    }
+    if (summary.length == 0) {
+        out_code = 400009;
+        out_msg = "Summary must not be empty";
+        return false;
+    }
+
+    NSFileManager *fm = [NSFileManager defaultManager];
+    if (archiveFilePath && archiveFilePath.length > 0) {
+        NSDictionary *fileAttrs = [fm attributesOfItemAtPath:archiveFilePath error:nil];
+        NSNumber *fileSize = fileAttrs[NSFileSize];
+        if (fileSize && [fileSize unsignedLongLongValue] > 10ULL * 1024ULL * 1024ULL) {
+            out_code = 400000;
+            out_msg = "Archive file too large (max 10MB)";
+            return false;
+        }
+    }
+
+    if (archiveCoverPath && archiveCoverPath.length > 0 && [fm fileExistsAtPath:archiveCoverPath]) {
+        NSDictionary *coverAttrs = [fm attributesOfItemAtPath:archiveCoverPath error:nil];
+        NSNumber *coverSize = coverAttrs[NSFileSize];
+        if (coverSize && [coverSize unsignedLongLongValue] > 512ULL * 1024ULL) {
+            out_code = 400000;
+            out_msg = "Cover file too large (max 512KB)";
+            return false;
+        }
+    }
+
+    return true;
+}
+
+static int _map_taptap_error_code(NSError *error, int default_code) {
+    if (!error) return default_code;
+
+    NSString *desc = error.localizedDescription ?: @"";
+    if ([desc rangeOfString:@"not marked queryable" options:NSCaseInsensitiveSearch].location != NSNotFound ||
+        [desc rangeOfString:@"not marked sortable" options:NSCaseInsensitiveSearch].location != NSNotFound) {
+        return 300002;
+    }
+
+    if (![error.domain isEqualToString:CKErrorDomain]) {
+        return default_code;
+    }
+
+    switch ((CKErrorCode)error.code) {
+        case CKErrorNotAuthenticated:
+        case CKErrorPermissionFailure:
+            return 300001;
+
+        case CKErrorUnknownItem:
+            return 400002;
+
+        case CKErrorQuotaExceeded:
+            return 400005;
+
+        case CKErrorLimitExceeded:
+            return 400003;
+
+        case CKErrorRequestRateLimited:
+        case CKErrorZoneBusy:
+        case CKErrorServerRecordChanged:
+        case CKErrorBatchRequestFailed:
+            return 400007;
+
+        case CKErrorNetworkUnavailable:
+        case CKErrorNetworkFailure:
+        case CKErrorServiceUnavailable:
+        case CKErrorOperationCancelled:
+        case CKErrorResultsTruncated:
+        case CKErrorAssetFileNotFound:
+        case CKErrorAssetFileModified:
+            return 400006;
+
+        default:
+            return default_code;
+    }
+}
+
 void Godot3CloudSave::createArchive(String metadataJson, String archiveFilePath, String archiveCoverPath) {
     NSLog(@"[CloudSave] createArchive: start. filePath=%s coverPath=%s",
           archiveFilePath.utf8().get_data(), archiveCoverPath.utf8().get_data());
@@ -275,6 +433,7 @@ void Godot3CloudSave::createArchive(String metadataJson, String archiveFilePath,
         Dictionary ret;
         ret["type"] = "create_archive_failed";
         ret["msg"] = "Path not found: " + archiveFilePath;
+        ret["code"] = 400000;
         _post_event(ret);
         return;
     }
@@ -290,6 +449,7 @@ void Godot3CloudSave::createArchive(String metadataJson, String archiveFilePath,
             Dictionary ret;
             ret["type"] = "create_archive_failed";
             ret["msg"] = "Failed to zip directory: " + archiveFilePath;
+            ret["code"] = 400000;
             _post_event(ret);
             return;
         }
@@ -323,9 +483,25 @@ void Godot3CloudSave::createArchive(String metadataJson, String archiveFilePath,
         }
     }
 
-    // Store metadata JSON string directly
     NSString *metaStr = [NSString stringWithUTF8String:metadataJson.utf8()];
     if (!metaStr || metaStr.length == 0) metaStr = @"{}";
+
+    String validation_msg;
+    int validation_code = 0;
+    NSString *coverPathForValidation = archiveCoverPath.length() > 0 ? [NSString stringWithUTF8String:archiveCoverPath.utf8()] : @"";
+    if (!_validate_metadata_and_limits(metaStr, uploadFilePath, coverPathForValidation, validation_msg, validation_code)) {
+        if (tempZipPath) {
+            [[NSFileManager defaultManager] removeItemAtPath:tempZipPath error:nil];
+        }
+        Dictionary ret;
+        ret["type"] = "create_archive_failed";
+        ret["msg"] = validation_msg;
+        ret["code"] = validation_code;
+        _post_event(ret);
+        return;
+    }
+
+    // Store metadata JSON string directly
     record[@"metadata"] = metaStr;
     NSLog(@"[CloudSave] createArchive: metadata set: %@", metaStr);
 
@@ -340,6 +516,7 @@ void Godot3CloudSave::createArchive(String metadataJson, String archiveFilePath,
         Dictionary ret;
         ret["type"] = "create_archive_failed";
         ret["msg"] = String("CloudKit disabled: ") + String([exception.reason UTF8String]);
+        ret["code"] = 300002;
         _post_event(ret);
         return;
     }
@@ -357,6 +534,7 @@ void Godot3CloudSave::createArchive(String metadataJson, String archiveFilePath,
                   (long)error.code, error.domain, error.localizedDescription);
             ret["type"] = "create_archive_failed";
             ret["msg"] = String([error.localizedDescription UTF8String]);
+            ret["code"] = _map_taptap_error_code(error, 400006);
         } else {
             NSLog(@"[CloudSave] createArchive: SUCCESS - saved record=%@", savedRecord.recordID.recordName);
             ret["type"] = "create_archive_success";
@@ -385,6 +563,7 @@ void Godot3CloudSave::getArchiveList() {
         Dictionary ret;
         ret["type"] = "get_archive_list_failed";
         ret["msg"] = String("CloudKit disabled: ") + String([exception.reason UTF8String]);
+        ret["code"] = 300002;
         _post_event(ret);
         return;
     }
@@ -401,6 +580,8 @@ void Godot3CloudSave::getArchiveList() {
                 NSLog(@"[CloudSave] getArchiveList: record type 'GameArchive' not found in schema - treating as empty list (first run)");
                 Dictionary data;
                 data["list"] = Array();
+                data["archives"] = Array();
+                data["count"] = 0;
                 ret["type"] = "get_archive_list_success";
                 ret["data"] = data;
                 _post_event(ret);
@@ -428,6 +609,8 @@ void Godot3CloudSave::getArchiveList() {
                             NSLog(@"[CloudSave] getArchiveList: fallback still blocked by CloudKit index config, treating as empty list to avoid blocking app flow");
                             Dictionary data;
                             data["list"] = Array();
+                            data["archives"] = Array();
+                            data["count"] = 0;
                             fallbackRet["type"] = "get_archive_list_success";
                             fallbackRet["data"] = data;
                             _post_event(fallbackRet);
@@ -435,6 +618,7 @@ void Godot3CloudSave::getArchiveList() {
                         }
                         fallbackRet["type"] = "get_archive_list_failed";
                         fallbackRet["msg"] = String([operationError.localizedDescription UTF8String]);
+                        fallbackRet["code"] = _map_taptap_error_code(operationError, 300002);
                         _post_event(fallbackRet);
                         return;
                     }
@@ -452,6 +636,8 @@ void Godot3CloudSave::getArchiveList() {
 
                     Dictionary data;
                     data["list"] = list;
+                    data["archives"] = list;
+                    data["count"] = list.size();
                     fallbackRet["type"] = "get_archive_list_success";
                     fallbackRet["data"] = data;
                     NSLog(@"[CloudSave] getArchiveList: fallback SUCCESS - found %lu records", (unsigned long)fetchedRecords.count);
@@ -463,6 +649,7 @@ void Godot3CloudSave::getArchiveList() {
             }
             ret["type"] = "get_archive_list_failed";
             ret["msg"] = String([error.localizedDescription UTF8String]);
+            ret["code"] = _map_taptap_error_code(error, 300002);
         } else {
             NSLog(@"[CloudSave] getArchiveList: SUCCESS - found %lu records", (unsigned long)results.count);
             NSArray<CKRecord *> *sortedResults = [results sortedArrayUsingComparator:^NSComparisonResult(CKRecord *a, CKRecord *b) {
@@ -478,6 +665,8 @@ void Godot3CloudSave::getArchiveList() {
             }
             Dictionary data;
             data["list"] = list;
+            data["archives"] = list;
+            data["count"] = list.size();
             ret["type"] = "get_archive_list_success";
             ret["data"] = data;
         }
@@ -503,6 +692,7 @@ void Godot3CloudSave::downloadArchiveData(String archiveUuid, String archiveFile
         Dictionary ret;
         ret["type"] = "download_archive_failed";
         ret["msg"] = String("CloudKit disabled: ") + String([exception.reason UTF8String]);
+        ret["code"] = 300002;
         ret["uuid"] = archiveUuid;
         _post_event(ret);
         return;
@@ -518,6 +708,7 @@ void Godot3CloudSave::downloadArchiveData(String archiveUuid, String archiveFile
                   error ? error.localizedDescription : @"Record not found");
             ret["type"] = "download_archive_failed";
             ret["msg"] = String(error ? [error.localizedDescription UTF8String] : "Record not found");
+            ret["code"] = _map_taptap_error_code(error, 400002);
             ret["uuid"] = archiveUuid;
         } else {
             NSLog(@"[CloudSave] downloadArchiveData: record fetched, uuid=%@ modified=%@",
@@ -577,16 +768,21 @@ void Godot3CloudSave::downloadArchiveData(String archiveUuid, String archiveFile
                     NSLog(@"[CloudSave] downloadArchiveData: SUCCESS at %@, attrs=%@", destPath, destAttrs[NSFileSize]);
                     ret["type"] = "download_archive_success";
                     ret["uuid"] = archiveUuid;
-                    ret["data"] = recordToDictionary(record);
+                    Dictionary data;
+                    data["path"] = localArchivePath;
+                    data["size"] = assetData ? (int)assetData.length : 0;
+                    ret["data"] = data;
                 } else {
                     ret["type"] = "download_archive_failed";
                     ret["msg"] = isZip ? "Unzip failed" : "File copy failed";
+                    ret["code"] = 400006;
                     ret["uuid"] = archiveUuid;
                 }
             } else {
                 NSLog(@"[CloudSave] downloadArchiveData: ERROR - no file asset in record (asset=%@)", asset);
                 ret["type"] = "download_archive_failed";
                 ret["msg"] = "No file asset in record";
+                ret["code"] = 400002;
                 ret["uuid"] = archiveUuid;
             }
         }
@@ -612,6 +808,7 @@ void Godot3CloudSave::updateArchive(String archiveUuid, String metadataJson, Str
         Dictionary ret;
         ret["type"] = "update_archive_failed";
         ret["msg"] = String("CloudKit disabled: ") + String([exception.reason UTF8String]);
+        ret["code"] = 300002;
         _post_event(ret);
         return;
     }
@@ -626,6 +823,7 @@ void Godot3CloudSave::updateArchive(String archiveUuid, String metadataJson, Str
             Dictionary ret;
             ret["type"] = "update_archive_failed";
             ret["msg"] = String(error ? [error.localizedDescription UTF8String] : "Record not found");
+            ret["code"] = _map_taptap_error_code(error, 400002);
             _post_event(ret);
             return;
         }
@@ -646,6 +844,7 @@ void Godot3CloudSave::updateArchive(String archiveUuid, String metadataJson, Str
                     Dictionary ret;
                     ret["type"] = "update_archive_failed";
                     ret["msg"] = "Failed to zip directory: " + archiveFilePath;
+                    ret["code"] = 400000;
                     _post_event(ret);
                     return;
                 }
@@ -674,9 +873,28 @@ void Godot3CloudSave::updateArchive(String archiveUuid, String metadataJson, Str
             }
         }
 
-        // Store metadata JSON string directly
         NSString *metaStr = [NSString stringWithUTF8String:metadataJson.utf8()];
         if (!metaStr || metaStr.length == 0) metaStr = @"{}";
+
+        String validation_msg;
+        int validation_code = 0;
+        NSString *coverPathForValidation = archiveCoverPath.length() > 0 ? [NSString stringWithUTF8String:archiveCoverPath.utf8()] : @"";
+        NSString *filePathForValidation = fileExists ? (isDir ? tempZipPath : filePath) : @"";
+        if (filePathForValidation && filePathForValidation.length > 0) {
+            if (!_validate_metadata_and_limits(metaStr, filePathForValidation, coverPathForValidation, validation_msg, validation_code)) {
+                if (tempZipPath) {
+                    [[NSFileManager defaultManager] removeItemAtPath:tempZipPath error:nil];
+                }
+                Dictionary ret;
+                ret["type"] = "update_archive_failed";
+                ret["msg"] = validation_msg;
+                ret["code"] = validation_code;
+                _post_event(ret);
+                return;
+            }
+        }
+
+        // Store metadata JSON string directly
         record[@"metadata"] = metaStr;
         NSLog(@"[CloudSave] updateArchive: metadata updated: %@", metaStr);
 
@@ -695,6 +913,7 @@ void Godot3CloudSave::updateArchive(String archiveUuid, String metadataJson, Str
                       (long)operationError.code, operationError.domain, operationError.localizedDescription);
                 ret["type"] = "update_archive_failed";
                 ret["msg"] = String([operationError.localizedDescription UTF8String]);
+                ret["code"] = _map_taptap_error_code(operationError, 400006);
             } else {
                 NSLog(@"[CloudSave] updateArchive: SUCCESS - saved %lu records", (unsigned long)savedRecords.count);
                 ret["type"] = "update_archive_success";
@@ -726,24 +945,40 @@ void Godot3CloudSave::deleteArchive(String archiveUuid) {
         Dictionary ret;
         ret["type"] = "delete_archive_failed";
         ret["msg"] = String("CloudKit disabled: ") + String([exception.reason UTF8String]);
+        ret["code"] = 300002;
         _post_event(ret);
         return;
     }
 
-    NSLog(@"[CloudSave] deleteArchive: deleting record uuid=%@...", uuid);
-    [database deleteRecordWithID:recordID completionHandler:^(CKRecordID * _Nullable deletedID, NSError * _Nullable error) {
-        Dictionary ret;
-        if (error) {
-            NSLog(@"[CloudSave] deleteArchive: ERROR - delete failed. code=%ld domain=%@ desc=%@",
-                  (long)error.code, error.domain, error.localizedDescription);
+    NSLog(@"[CloudSave] deleteArchive: fetching record before delete uuid=%@...", uuid);
+    [database fetchRecordWithID:recordID completionHandler:^(CKRecord * _Nullable record, NSError * _Nullable fetchError) {
+        if (fetchError || !record) {
+            Dictionary ret;
             ret["type"] = "delete_archive_failed";
-            ret["msg"] = String([error.localizedDescription UTF8String]);
-        } else {
-            NSLog(@"[CloudSave] deleteArchive: SUCCESS - deleted uuid=%@", deletedID.recordName);
-            ret["type"] = "delete_archive_success";
-            ret["uuid"] = archiveUuid;
+            ret["msg"] = String(fetchError ? [fetchError.localizedDescription UTF8String] : "Record not found");
+            ret["code"] = _map_taptap_error_code(fetchError, 400002);
+            _post_event(ret);
+            return;
         }
-        _post_event(ret);
+
+        Dictionary archiveData = recordToDictionary(record);
+        NSLog(@"[CloudSave] deleteArchive: deleting record uuid=%@...", uuid);
+        [database deleteRecordWithID:recordID completionHandler:^(CKRecordID * _Nullable deletedID, NSError * _Nullable error) {
+            Dictionary ret;
+            if (error) {
+                NSLog(@"[CloudSave] deleteArchive: ERROR - delete failed. code=%ld domain=%@ desc=%@",
+                      (long)error.code, error.domain, error.localizedDescription);
+                ret["type"] = "delete_archive_failed";
+                ret["msg"] = String([error.localizedDescription UTF8String]);
+                ret["code"] = _map_taptap_error_code(error, 400006);
+            } else {
+                NSLog(@"[CloudSave] deleteArchive: SUCCESS - deleted uuid=%@", deletedID.recordName);
+                ret["type"] = "delete_archive_success";
+                ret["uuid"] = archiveUuid;
+                ret["data"] = archiveData;
+            }
+            _post_event(ret);
+        }];
     }];
 }
 
@@ -764,6 +999,7 @@ void Godot3CloudSave::getArchiveCover(String archiveUuid, String archiveFileId) 
         Dictionary ret;
         ret["type"] = "get_archive_cover_failed";
         ret["msg"] = String("CloudKit disabled: ") + String([exception.reason UTF8String]);
+        ret["code"] = 300002;
         _post_event(ret);
         return;
     }
@@ -778,6 +1014,7 @@ void Godot3CloudSave::getArchiveCover(String archiveUuid, String archiveFileId) 
                    error ? error.localizedDescription : @"Record not found");
              ret["type"] = "get_archive_cover_failed";
              ret["msg"] = String(error ? [error.localizedDescription UTF8String] : "Record not found");
+             ret["code"] = _map_taptap_error_code(error, 400002);
          } else {
              NSLog(@"[CloudSave] getArchiveCover: record fetched, checking cover asset...");
              CKAsset *coverAsset = record[@"cover"];
@@ -799,11 +1036,13 @@ void Godot3CloudSave::getArchiveCover(String archiveUuid, String archiveFileId) 
                      NSLog(@"[CloudSave] getArchiveCover: ERROR - cover asset URL exists but data is empty");
                      ret["type"] = "get_archive_cover_failed";
                      ret["msg"] = "Cover data empty";
+                     ret["code"] = 400002;
                  }
              } else {
                  NSLog(@"[CloudSave] getArchiveCover: ERROR - no cover asset in record (coverAsset=%@)", coverAsset);
                  ret["type"] = "get_archive_cover_failed";
                  ret["msg"] = "No cover asset";
+                 ret["code"] = 400002;
              }
          }
          _post_event(ret);

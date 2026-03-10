@@ -67,8 +67,12 @@ func _dispatch_event(event: Dictionary):
 	var type = event.get("type", "")
 	var data = event.get("data", {}) 
 	var msg = event.get("msg", "")
+	var code = int(event.get("code", -1))
 	var uuid = event.get("uuid", "")
-	var err_data = {"message": msg}
+	var err_message = {"message": msg, "code": code}
+	var err_error = {"error": msg, "code": code}
+	if code == 300001 or code == 300002:
+		emit_signal("onCloudSaveCallback", code)
 	
 	match type:
 		"create_archive_success":
@@ -76,28 +80,28 @@ func _dispatch_event(event: Dictionary):
 			emit_signal("onCreateArchiveSuccess", archive_data)
 			emit_signal("onCreateArchiveCompleted", archive_data, OK)
 		"create_archive_failed":
-			emit_signal("onCreateArchiveFailed", err_data)
+			emit_signal("onCreateArchiveFailed", err_message)
 			emit_signal("onCreateArchiveCompleted", null, ERR_BUG)
 		
 		"get_archive_list_success":
-			var list_raw = data.get("list", [])
+			var list_raw = data.get("archives", data.get("list", []))
 			var archives = []
 			for item in list_raw:
 				if item is Dictionary:
 					archives.append(_normalize_archive(item))
-			var list_data = {"archives": archives, "count": archives.size()}
+			var list_data = {"archives": archives, "count": int(data.get("count", archives.size()))}
 			emit_signal("onGetArchiveListSuccess", list_data)
 			emit_signal("onGetArchiveListCompleted", list_data, OK)
 		"get_archive_list_failed":
-			emit_signal("onGetArchiveListFailed", err_data)
+			emit_signal("onGetArchiveListFailed", err_message)
 			emit_signal("onGetArchiveListCompleted", null, ERR_BUG)
 			
 		"download_archive_success":
-			var download_data = _normalize_archive(data)
+			var download_data = data
 			emit_signal("onDownloadArchiveDataSuccess", download_data)
 			emit_signal("onDownloadArchiveDataCompleted", download_data, OK)
 		"download_archive_failed":
-			emit_signal("onDownloadArchiveDataFailed", err_data)
+			emit_signal("onDownloadArchiveDataFailed", err_error)
 			emit_signal("onDownloadArchiveDataCompleted", null, ERR_BUG)
 			
 		"update_archive_success":
@@ -105,22 +109,22 @@ func _dispatch_event(event: Dictionary):
 			emit_signal("onUpdateArchiveSuccess", update_data)
 			emit_signal("onUpdateArchiveCompleted", update_data, OK)
 		"update_archive_failed":
-			emit_signal("onUpdateArchiveFailed", err_data)
+			emit_signal("onUpdateArchiveFailed", err_message)
 			emit_signal("onUpdateArchiveCompleted", null, ERR_BUG)
 			
 		"delete_archive_success":
-			var ret_data = {"archiveUuid": uuid, "uuid": uuid}
+			var ret_data = data if (data is Dictionary and data.size() > 0) else {"archiveUuid": uuid, "uuid": uuid}
 			emit_signal("onDeleteArchiveSuccess", ret_data)
 			emit_signal("onDeleteArchiveCompleted", ret_data, OK)
 		"delete_archive_failed":
-			emit_signal("onDeleteArchiveFailed", err_data)
+			emit_signal("onDeleteArchiveFailed", err_message)
 			emit_signal("onDeleteArchiveCompleted", null, ERR_BUG)
 			
 		"get_archive_cover_success":
 			emit_signal("onGetArchiveCoverSuccess", data) 
 			emit_signal("onGetArchiveCoverCompleted", data, OK)
 		"get_archive_cover_failed":
-			emit_signal("onGetArchiveCoverFailed", err_data)
+			emit_signal("onGetArchiveCoverFailed", err_message)
 			emit_signal("onGetArchiveCoverCompleted", null, ERR_BUG)
 
 #region Public API
