@@ -160,4 +160,8 @@ func deleteArchive(archiveUuid: String) -> void:
 func getArchiveCover(archiveUuid: String, archiveFileId: String) -> void:
 	if not singleton: return
 	singleton.getArchiveCover(archiveUuid, archiveFileId)
+
+func showTip(text: String) -> void:
+	if not singleton: return
+	singleton.showTip(text)
 #endregion

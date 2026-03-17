@@ -33,6 +33,8 @@ public:
     void deleteArchive(String archiveUuid);
     void getArchiveCover(String archiveUuid, String archiveFileId);
 
+    void showTip(String text);
+
     bool isAvailable();
 
 protected:
