@@ -441,63 +441,78 @@ bool Godot3CloudSave::isAvailable() {
     return token != nil;
 }
 
+// MARK: - Toast Queue
+
+static NSMutableArray *s_toastQueue = nil;
+static BOOL s_isShowingToast = NO;
+
+static void _process_toast_queue() {
+    if (s_isShowingToast || s_toastQueue.count == 0) return;
+
+    s_isShowingToast = YES;
+    NSString *message = s_toastQueue[0];
+    [s_toastQueue removeObjectAtIndex:0];
+
+    // Create Toast View
+    UIView *toastView = [[UIView alloc] init];
+    toastView.backgroundColor = [[UIColor blackColor] colorWithAlphaComponent:0.8];
+    toastView.layer.cornerRadius = 10.0;
+    toastView.clipsToBounds = YES;
+    toastView.alpha = 0.0;
+
+    // Create Label
+    UILabel *label = [[UILabel alloc] init];
+    label.text = message;
+    label.textColor = [UIColor whiteColor];
+    label.textAlignment = NSTextAlignmentCenter;
+    label.font = [UIFont systemFontOfSize:14.0];
+    label.numberOfLines = 0;
+    [toastView addSubview:label];
+
+    // Layout
+    CGSize screenSize = [UIScreen mainScreen].bounds.size;
+    CGFloat maxWidth = screenSize.width * 0.8;
+    CGSize textSize = [message boundingRectWithSize:CGSizeMake(maxWidth, CGFLOAT_MAX)
+                                            options:NSStringDrawingUsesLineFragmentOrigin
+                                         attributes:@{ NSFontAttributeName : label.font }
+                                            context:nil]
+                              .size;
+
+    CGFloat padding = 20.0;
+    CGFloat w = textSize.width + padding * 2;
+    CGFloat h = textSize.height + padding * 2;
+    toastView.frame = CGRectMake((screenSize.width - w) / 2, screenSize.height - 150, w, h);
+    label.frame = CGRectMake(padding, padding, textSize.width, textSize.height);
+
+    UIWindow *keyWindow = [UIApplication sharedApplication].keyWindow;
+    [keyWindow addSubview:toastView];
+
+    // Animate
+    [UIView animateWithDuration:0.3 animations:^{
+        toastView.alpha = 1.0;
+    } completion:^(BOOL finished) {
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            [UIView animateWithDuration:0.3 animations:^{
+                toastView.alpha = 0.0;
+            } completion:^(BOOL finished) {
+                [toastView removeFromSuperview];
+                s_isShowingToast = NO;
+                _process_toast_queue();
+            }];
+        });
+    }];
+}
+
 void Godot3CloudSave::showTip(String p_text) {
 	NSString *message = [[NSString alloc] initWithUTF8String:p_text.utf8().get_data()];
 	dispatch_async(dispatch_get_main_queue(), ^{
-		// 创建 Toast 视图
-		UIView *toastView = [[UIView alloc] init];
-		toastView.backgroundColor = [[UIColor blackColor] colorWithAlphaComponent:0.8];
-		toastView.layer.cornerRadius = 10.0;
-		toastView.clipsToBounds = YES;
-
-		// 创建标签
-		UILabel *label = [[UILabel alloc] init];
-		label.text = message;
-		label.textColor = [UIColor whiteColor];
-		label.textAlignment = NSTextAlignmentCenter;
-		label.font = [UIFont systemFontOfSize:14.0];
-		label.numberOfLines = 0;
-		[toastView addSubview:label];
-
-		// 计算尺寸
-		CGSize screenSize = [UIScreen mainScreen].bounds.size;
-		CGFloat maxWidth = screenSize.width * 0.8;
-		CGSize textSize = [message boundingRectWithSize:CGSizeMake(maxWidth, CGFLOAT_MAX)
-												options:NSStringDrawingUsesLineFragmentOrigin
-											 attributes:@{ NSFontAttributeName : label.font }
-												context:nil]
-								  .size;
-
-		CGFloat padding = 20.0;
-		toastView.frame = CGRectMake((screenSize.width - textSize.width - padding * 2) / 2,
-				screenSize.height - 150,
-				textSize.width + padding * 2,
-				textSize.height + padding * 2);
-		label.frame = CGRectMake(padding, padding, textSize.width, textSize.height);
-
-		// 添加到窗口
-		UIWindow *keyWindow = [UIApplication sharedApplication].keyWindow;
-		[keyWindow addSubview:toastView];
-
-		// 动画显示
-		toastView.alpha = 0.0;
-		[UIView animateWithDuration:0.3
-				animations:^{
-					toastView.alpha = 1.0;
-				}
-				completion:^(BOOL finished) {
-					// 延迟消失
-					dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-						[UIView animateWithDuration:0.3
-								animations:^{
-									toastView.alpha = 0.0;
-								}
-								completion:^(BOOL finished) {
-									[toastView removeFromSuperview];
-								}];
-					});
-				}];
+        if (s_toastQueue == nil) {
+            s_toastQueue = [[NSMutableArray alloc] init];
+        }
+        [s_toastQueue addObject:message];
+        _process_toast_queue();
 	});
+
 }
 
 // Helpers
