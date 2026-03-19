@@ -195,59 +195,6 @@ static const uint32_t kCSZipEOCDSig = 0x06054b50U;
 
 Godot3CloudSave *Godot3CloudSave::instance = NULL;
 
-// MARK: - Diagnostic helpers
-
-/// Print iCloud account status, ubiquity identity token, and CloudKit container info.
-/// Call this at any diagnostic point — it is read-only and has no side effects.
-static void _log_icloud_diagnostics(NSString *caller) {
-    NSFileManager *fm = [NSFileManager defaultManager];
-    id token = [fm ubiquityIdentityToken];
-
-    // Ubiquity token: non-nil means an iCloud account is signed in on this device.
-    // The token value changes when the user switches Apple ID.
-    NSLog(@"[CloudSave][Diag][%@] ubiquityIdentityToken=%@  (nil=not signed in / iCloud disabled)",
-          caller, token ? token : @"<nil>");
-
-    // CKContainer.currentUserAccountStatus gives the actual CloudKit login state.
-    CKContainer *container = nil;
-    @try {
-        container = [CKContainer defaultContainer];
-        NSLog(@"[CloudSave][Diag][%@] containerIdentifier=%@", caller, container.containerIdentifier);
-    } @catch (NSException *e) {
-        NSLog(@"[CloudSave][Diag][%@] CKContainer defaultContainer exception: %@", caller, e.reason);
-        return;
-    }
-
-    [container accountStatusWithCompletionHandler:^(CKAccountStatus status, NSError *error) {
-        NSString *statusStr;
-        switch (status) {
-            case CKAccountStatusAvailable:        statusStr = @"Available"; break;
-            case CKAccountStatusNoAccount:        statusStr = @"NoAccount"; break;
-            case CKAccountStatusRestricted:       statusStr = @"Restricted"; break;
-            case CKAccountStatusCouldNotDetermine:statusStr = @"CouldNotDetermine"; break;
-            default:                              statusStr = [NSString stringWithFormat:@"Unknown(%ld)", (long)status]; break;
-        }
-        if (error) {
-            NSLog(@"[CloudSave][Diag][%@] accountStatus=ERROR code=%ld domain=%@ desc=%@",
-                  caller, (long)error.code, error.domain, error.localizedDescription);
-        } else {
-            NSLog(@"[CloudSave][Diag][%@] accountStatus=%@", caller, statusStr);
-        }
-    }];
-
-    // Fetch current user record ID — contains a stable per-Apple-ID identifier.
-    [container fetchUserRecordIDWithCompletionHandler:^(CKRecordID *userRecordID, NSError *error) {
-        if (error) {
-            NSLog(@"[CloudSave][Diag][%@] userRecordID=ERROR code=%ld domain=%@ desc=%@",
-                  caller, (long)error.code, error.domain, error.localizedDescription);
-        } else {
-            // recordName is a stable opaque ID per Apple ID — safe to log for cross-device correlation.
-            NSLog(@"[CloudSave][Diag][%@] userRecordID=%@ (use this to verify same Apple ID across devices)",
-                  caller, userRecordID.recordName);
-        }
-    }];
-}
-
 // MARK: - Recent write cache
 
 static const uint64_t kRecentWriteCacheTTLMS = 30000;
@@ -390,7 +337,6 @@ static Array _get_all_recent_writes() {
     for (const auto &it : g_recent_write_cache) {
         list.push_back(it.second);
     }
-    NSLog(@"[CloudSave][Cache] get_all_recent_writes: returning %d entries", list.size());
     return list;
 }
 
@@ -437,7 +383,6 @@ void Godot3CloudSave::_bind_methods() {
 
 bool Godot3CloudSave::isAvailable() {
     id token = [[NSFileManager defaultManager] ubiquityIdentityToken];
-    NSLog(@"[CloudSave] isAvailable: ubiquityIdentityToken=%@", token ? @"present" : @"nil");
     return token != nil;
 }
 
@@ -703,7 +648,6 @@ static int _map_taptap_error_code(NSError *error, int default_code) {
 void Godot3CloudSave::createArchive(String metadataJson, String archiveFilePath, String archiveCoverPath) {
     NSLog(@"[CloudSave] createArchive: start. filePath=%s coverPath=%s",
           archiveFilePath.utf8().get_data(), archiveCoverPath.utf8().get_data());
-    _log_icloud_diagnostics(@"createArchive");
 
     NSString *filePath = [NSString stringWithUTF8String:archiveFilePath.utf8()];
     BOOL isDir = NO;
@@ -739,25 +683,18 @@ void Godot3CloudSave::createArchive(String metadataJson, String archiveFilePath,
         uploadFilePath = tempZipPath;
         NSLog(@"[CloudSave] createArchive: directory zipped to temp file: %@, size=%lu bytes",
               tempZipPath, (unsigned long)zipData.length);
-    } else {
-        NSDictionary *fileAttrs = [[NSFileManager defaultManager] attributesOfItemAtPath:filePath error:nil];
-        NSLog(@"[CloudSave] createArchive: file found, size=%@ bytes", fileAttrs[NSFileSize]);
     }
 
     NSString *uuid = [[NSUUID UUID] UUIDString];
-    NSLog(@"[CloudSave] createArchive: generated UUID=%@", uuid);
     CKRecordID *recordID = [[CKRecordID alloc] initWithRecordName:uuid];
     CKRecord *record = [[CKRecord alloc] initWithRecordType:@"GameArchive" recordID:recordID];
 
     record[@"file"] = [[CKAsset alloc] initWithFileURL:[NSURL fileURLWithPath:uploadFilePath]];
-    NSLog(@"[CloudSave] createArchive: file asset attached (isDir=%@, wasZipped=%@)",
-          isDir ? @"YES" : @"NO", tempZipPath ? @"YES" : @"NO");
 
     if (archiveCoverPath.length() > 0) {
         NSString *coverPath = [NSString stringWithUTF8String:archiveCoverPath.utf8()];
         if ([[NSFileManager defaultManager] fileExistsAtPath:coverPath]) {
             record[@"cover"] = [[CKAsset alloc] initWithFileURL:[NSURL fileURLWithPath:coverPath]];
-            NSLog(@"[CloudSave] createArchive: cover asset attached from %@", coverPath);
         } else {
             NSLog(@"[CloudSave] createArchive: WARNING - cover file not found at %@, skipping", coverPath);
         }
@@ -785,13 +722,11 @@ void Godot3CloudSave::createArchive(String metadataJson, String archiveFilePath,
 
     // Store metadata JSON string directly
     record[@"metadata"] = metaStr;
-    NSLog(@"[CloudSave] createArchive: metadata set: %@", metaStr);
 
     CKContainer *container = nil;
     CKDatabase *database = nil;
     @try {
         container = [CKContainer defaultContainer];
-        NSLog(@"[CloudSave] createArchive: container=%@", container.containerIdentifier);
         database = [container privateCloudDatabase];
     } @catch (NSException *exception) {
         NSLog(@"[CloudSave] createArchive: ERROR - CloudKit exception: %@", exception.reason);
@@ -803,13 +738,10 @@ void Godot3CloudSave::createArchive(String metadataJson, String archiveFilePath,
         return;
     }
 
-    NSLog(@"[CloudSave] createArchive: saving record to CloudKit... uuid=%@ container=%@",
-          uuid, container.containerIdentifier);
     [database saveRecord:record completionHandler:^(CKRecord *savedRecord, NSError *error) {
         // Cleanup temp zip regardless of outcome
         if (tempZipPath) {
             [[NSFileManager defaultManager] removeItemAtPath:tempZipPath error:nil];
-            NSLog(@"[CloudSave] createArchive: temp zip cleaned up: %@", tempZipPath);
         }
         Dictionary ret;
         if (error) {
@@ -833,7 +765,6 @@ void Godot3CloudSave::createArchive(String metadataJson, String archiveFilePath,
 
 void Godot3CloudSave::getArchiveList() {
     NSLog(@"[CloudSave] getArchiveList: start");
-    _log_icloud_diagnostics(@"getArchiveList");
 
     NSPredicate *predicate = [NSPredicate predicateWithValue:YES];
     CKQuery *query = [[CKQuery alloc] initWithRecordType:@"GameArchive" predicate:predicate];
@@ -844,7 +775,6 @@ void Godot3CloudSave::getArchiveList() {
     CKDatabase *database = nil;
     @try {
         container = [CKContainer defaultContainer];
-        NSLog(@"[CloudSave] getArchiveList: container=%@", container.containerIdentifier);
         database = [container privateCloudDatabase];
     } @catch (NSException *exception) {
         NSLog(@"[CloudSave] getArchiveList: ERROR - CloudKit exception: %@", exception.reason);
@@ -856,8 +786,6 @@ void Godot3CloudSave::getArchiveList() {
         return;
     }
 
-    NSLog(@"[CloudSave] getArchiveList: executing query on GameArchive... container=%@",
-          container.containerIdentifier);
     [database performQuery:query inZoneWithID:nil completionHandler:^(NSArray<CKRecord *> * _Nullable results, NSError * _Nullable error) {
         Dictionary ret;
         if (error) {
@@ -981,8 +909,6 @@ void Godot3CloudSave::getArchiveList() {
             }];
             Array list;
             for (CKRecord *record in sortedResults) {
-                NSLog(@"[CloudSave] getArchiveList: record uuid=%@ modified=%@",
-                      record.recordID.recordName, record.modificationDate);
                 list.push_back(recordToDictionary(record));
             }
 
@@ -1035,7 +961,6 @@ void Godot3CloudSave::downloadArchiveData(String archiveUuid, String archiveFile
     CKDatabase *database = nil;
     @try {
         container = [CKContainer defaultContainer];
-        NSLog(@"[CloudSave] downloadArchiveData: container=%@", container.containerIdentifier);
         database = [container privateCloudDatabase];
     } @catch (NSException *exception) {
         NSLog(@"[CloudSave] downloadArchiveData: ERROR - CloudKit exception: %@", exception.reason);
@@ -1143,7 +1068,6 @@ void Godot3CloudSave::downloadArchiveData(String archiveUuid, String archiveFile
 void Godot3CloudSave::updateArchive(String archiveUuid, String metadataJson, String archiveFilePath, String archiveCoverPath) {
     NSLog(@"[CloudSave] updateArchive: start. uuid=%s filePath=%s",
           archiveUuid.utf8().get_data(), archiveFilePath.utf8().get_data());
-    _log_icloud_diagnostics(@"updateArchive");
 
     NSString *uuid = [NSString stringWithUTF8String:archiveUuid.utf8()];
     CKRecordID *recordID = [[CKRecordID alloc] initWithRecordName:uuid];
@@ -1152,7 +1076,6 @@ void Godot3CloudSave::updateArchive(String archiveUuid, String metadataJson, Str
     CKDatabase *database = nil;
     @try {
         container = [CKContainer defaultContainer];
-        NSLog(@"[CloudSave] updateArchive: container=%@", container.containerIdentifier);
         database = [container privateCloudDatabase];
     } @catch (NSException *exception) {
         NSLog(@"[CloudSave] updateArchive: ERROR - CloudKit exception: %@", exception.reason);
@@ -1178,8 +1101,6 @@ void Godot3CloudSave::updateArchive(String archiveUuid, String metadataJson, Str
             _post_event(ret);
             return;
         }
-
-        NSLog(@"[CloudSave] updateArchive: record fetched, applying updates...");
 
         NSString *filePath = [NSString stringWithUTF8String:archiveFilePath.utf8()];
         BOOL isDir = NO;
@@ -1218,7 +1139,6 @@ void Godot3CloudSave::updateArchive(String archiveUuid, String metadataJson, Str
             NSString *coverPath = [NSString stringWithUTF8String:archiveCoverPath.utf8()];
             if ([[NSFileManager defaultManager] fileExistsAtPath:coverPath]) {
                 record[@"cover"] = [[CKAsset alloc] initWithFileURL:[NSURL fileURLWithPath:coverPath]];
-                NSLog(@"[CloudSave] updateArchive: cover asset attached");
             } else {
                 NSLog(@"[CloudSave] updateArchive: WARNING - cover not found at %@, skipping", coverPath);
             }
@@ -1254,16 +1174,13 @@ void Godot3CloudSave::updateArchive(String archiveUuid, String metadataJson, Str
 
         // Store metadata JSON string directly
         record[@"metadata"] = metaStr;
-        NSLog(@"[CloudSave] updateArchive: metadata updated: %@", metaStr);
 
         CKModifyRecordsOperation *op = [[CKModifyRecordsOperation alloc] initWithRecordsToSave:@[record] recordIDsToDelete:nil];
         op.savePolicy = CKRecordSaveAllKeys;
-        NSLog(@"[CloudSave] updateArchive: submitting CKModifyRecordsOperation...");
 
         op.modifyRecordsCompletionBlock = ^(NSArray<CKRecord *> * _Nullable savedRecords, NSArray<CKRecordID *> * _Nullable deletedRecordIDs, NSError * _Nullable operationError) {
             if (tempZipPath) {
                 [[NSFileManager defaultManager] removeItemAtPath:tempZipPath error:nil];
-                NSLog(@"[CloudSave] updateArchive: temp zip cleaned up: %@", tempZipPath);
             }
             Dictionary ret;
             if (operationError) {
@@ -1292,7 +1209,6 @@ void Godot3CloudSave::updateArchive(String archiveUuid, String metadataJson, Str
 
 void Godot3CloudSave::deleteArchive(String archiveUuid) {
     NSLog(@"[CloudSave] deleteArchive: start. uuid=%s", archiveUuid.utf8().get_data());
-    _log_icloud_diagnostics(@"deleteArchive");
 
     NSString *uuid = [NSString stringWithUTF8String:archiveUuid.utf8()];
     CKRecordID *recordID = [[CKRecordID alloc] initWithRecordName:uuid];
@@ -1301,7 +1217,6 @@ void Godot3CloudSave::deleteArchive(String archiveUuid) {
     CKDatabase *database = nil;
     @try {
         container = [CKContainer defaultContainer];
-        NSLog(@"[CloudSave] deleteArchive: container=%@", container.containerIdentifier);
         database = [container privateCloudDatabase];
     } @catch (NSException *exception) {
         NSLog(@"[CloudSave] deleteArchive: ERROR - CloudKit exception: %@", exception.reason);
@@ -1355,7 +1270,6 @@ void Godot3CloudSave::getArchiveCover(String archiveUuid, String archiveFileId) 
     CKDatabase *database = nil;
     @try {
         container = [CKContainer defaultContainer];
-        NSLog(@"[CloudSave] getArchiveCover: container=%@", container.containerIdentifier);
         database = [container privateCloudDatabase];
     } @catch (NSException *exception) {
         NSLog(@"[CloudSave] getArchiveCover: ERROR - CloudKit exception: %@", exception.reason);
@@ -1379,7 +1293,6 @@ void Godot3CloudSave::getArchiveCover(String archiveUuid, String archiveFileId) 
              ret["msg"] = String(error ? [error.localizedDescription UTF8String] : "Record not found");
              ret["code"] = _map_taptap_error_code(error, 400002);
          } else {
-             NSLog(@"[CloudSave] getArchiveCover: record fetched, checking cover asset...");
              CKAsset *coverAsset = record[@"cover"];
              if (coverAsset && coverAsset.fileURL) {
                  NSLog(@"[CloudSave] getArchiveCover: cover asset found at %@", coverAsset.fileURL.path);
