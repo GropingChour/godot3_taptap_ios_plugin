@@ -48,7 +48,14 @@ API_AVAILABLE(ios(13.0))
 		ret["result"] = "ok";
 
 		// Stable, opaque user identifier — persist this for future credential-state checks.
-		ret["user"] = [credential.user UTF8String];
+		const char *user_str = [credential.user UTF8String];
+		ret["user"] = user_str ? user_str : "";
+
+		// Update in-process session state.
+		if (AppleSignIn::get_singleton()) {
+			AppleSignIn::get_singleton()->signed_in = true;
+			AppleSignIn::get_singleton()->current_user = String::utf8(user_str ? user_str : "");
+		}
 
 		// Email — only populated on the very first sign-in; empty string thereafter.
 		ret["email"] = credential.email ? [credential.email UTF8String] : "";
@@ -98,6 +105,10 @@ API_AVAILABLE(ios(13.0))
 		ret["result"] = "error";
 		ret["error_code"] = (int64_t)-1;
 		ret["error_description"] = "Unexpected credential type received.";
+
+		if (AppleSignIn::get_singleton()) {
+			AppleSignIn::get_singleton()->signed_in = false;
+		}
 	}
 
 	if (AppleSignIn::get_singleton()) {
@@ -118,6 +129,12 @@ API_AVAILABLE(ios(13.0))
 		ret["result"] = "error";
 		ret["error_code"] = (int64_t)error.code;
 		ret["error_description"] = [error.localizedDescription UTF8String];
+	}
+
+	// Any non-success outcome clears the in-process session state.
+	if (AppleSignIn::get_singleton()) {
+		AppleSignIn::get_singleton()->signed_in = false;
+		AppleSignIn::get_singleton()->current_user = String();
 	}
 
 	if (AppleSignIn::get_singleton()) {
@@ -142,6 +159,10 @@ void AppleSignIn::_bind_methods() {
 	    &AppleSignIn::sign_in);
 	ClassDB::bind_method(D_METHOD("check_credential_state", "user_id"),
 	    &AppleSignIn::check_credential_state);
+	ClassDB::bind_method(D_METHOD("is_signed_in"),
+	    &AppleSignIn::is_signed_in);
+	ClassDB::bind_method(D_METHOD("get_current_user"),
+	    &AppleSignIn::get_current_user);
 	ClassDB::bind_method(D_METHOD("get_pending_event_count"),
 	    &AppleSignIn::get_pending_event_count);
 	ClassDB::bind_method(D_METHOD("pop_pending_event"),
@@ -205,12 +226,25 @@ void AppleSignIn::check_credential_state(String user_id) {
 				    switch (state) {
 					    case ASAuthorizationAppleIDProviderCredentialAuthorized:
 						    ret["result"] = "authorized";
+						    // Confirm signed-in state for this session.
+						    if (AppleSignIn::get_singleton()) {
+							    AppleSignIn::get_singleton()->signed_in = true;
+							    AppleSignIn::get_singleton()->current_user = String::utf8([uid UTF8String]);
+						    }
 						    break;
 					    case ASAuthorizationAppleIDProviderCredentialRevoked:
 						    ret["result"] = "revoked";
+						    if (AppleSignIn::get_singleton()) {
+							    AppleSignIn::get_singleton()->signed_in = false;
+							    AppleSignIn::get_singleton()->current_user = String();
+						    }
 						    break;
 					    case ASAuthorizationAppleIDProviderCredentialNotFound:
 						    ret["result"] = "not_found";
+						    if (AppleSignIn::get_singleton()) {
+							    AppleSignIn::get_singleton()->signed_in = false;
+							    AppleSignIn::get_singleton()->current_user = String();
+						    }
 						    break;
 					    default:
 						    // ASAuthorizationAppleIDProviderCredentialTransferred (iOS 14+)
@@ -244,6 +278,14 @@ void AppleSignIn::_post_event(Variant p_event) {
 	pending_events.push_back(p_event);
 }
 
+bool AppleSignIn::is_signed_in() {
+	return signed_in;
+}
+
+String AppleSignIn::get_current_user() {
+	return current_user;
+}
+
 int AppleSignIn::get_pending_event_count() {
 	return pending_events.size();
 }
@@ -261,6 +303,8 @@ AppleSignIn *AppleSignIn::get_singleton() {
 AppleSignIn::AppleSignIn() {
 	ERR_FAIL_COND(instance != NULL);
 	instance = this;
+	signed_in = false;
+	current_user = String();
 
 	if (@available(iOS 13.0, *)) {
 		apple_signin_delegate = [[GodotAppleSignInDelegate alloc] init];

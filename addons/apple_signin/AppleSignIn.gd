@@ -137,6 +137,30 @@ func check_credential_state(user_id: String) -> void:
 		_emit_unavailable("credential_state")
 
 # ---------------------------------------------------------------------------
+# Session state queries
+# ---------------------------------------------------------------------------
+
+func is_signed_in() -> bool:
+	## Synchronous in-process signed-in check.
+	##
+	## Returns true when the most recent sign_in() succeeded OR when
+	## check_credential_state() last returned "authorized" in this session.
+	##
+	## IMPORTANT: this state is NOT persistent across app restarts.
+	## Always call check_credential_state() at launch to re-establish it.
+	if _singleton:
+		return _singleton.is_signed_in()
+	return false
+
+func get_current_user() -> String:
+	## Returns the user identifier from the most recent successful sign-in or
+	## authorized credential-state check in this session.
+	## Returns an empty String when not signed in.
+	if _singleton:
+		return _singleton.get_current_user()
+	return ""
+
+# ---------------------------------------------------------------------------
 # Cache helpers — public for advanced use cases
 # ---------------------------------------------------------------------------
 
