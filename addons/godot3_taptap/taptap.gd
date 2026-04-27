@@ -146,7 +146,7 @@ func _connect_achievement_signal():
 		singleton.connect("onAchievementFailure", self, "_onAchievementFailure")
 
 #region SDK初始化
-func initSdk(clientId: String, clientToken: String, enableLog: bool = false, withIAP: bool = false, withAchievement: bool = false, enableAchievementToast: bool = true) -> void:
+func initSdk(clientId: String, clientToken: String, enableLog: bool = false, withIAP: bool = false, withAchievement: bool = false) -> void:
 	# 初始化 TapTap SDK
 	#
 	# Args:
@@ -155,12 +155,12 @@ func initSdk(clientId: String, clientToken: String, enableLog: bool = false, wit
 	#   enableLog: 是否启用日志，默认为 false
 	#   withIAP: 是否启用内购功能，默认为 false
 	#   withAchievement: 是否启用成就系统，默认为 false
-	#   enableAchievementToast: 成就达成时是否展示气泡弹窗提示，默认为 true
+	#                    达成成就时默认展示气泡弹窗，可在初始化后调用 setAchievementToastEnabled() 修改
 	if not singleton: return
-	singleton.initSdk(clientId, clientToken, enableLog, withIAP, withAchievement, enableAchievementToast)
+	singleton.initSdk(clientId, clientToken, enableLog, withIAP, withAchievement)
 
 # 使用加密token初始化SDK（推荐）
-func initSdkWithEncryptedToken(clientId: String, encryptedToken: String, enableLog: bool = false, withIAP: bool = false, withAchievement: bool = false, enableAchievementToast: bool = true) -> void:
+func initSdkWithEncryptedToken(clientId: String, encryptedToken: String, enableLog: bool = false, withIAP: bool = false, withAchievement: bool = false) -> void:
 	# 使用加密的token初始化SDK，提高安全性
 	# 使用简单加密工具生成的加密token
 	#
@@ -169,9 +169,8 @@ func initSdkWithEncryptedToken(clientId: String, encryptedToken: String, enableL
 	#   clientId: 游戏 Client ID，从开发者中心获取  
 	#   enableLog: 是否启用日志，默认为 false
 	#   withAchievement: 是否启用成就系统，默认为 false
-	#   enableAchievementToast: 成就达成时是否展示气泡弹窗提示，默认为 true
 	if not singleton: return
-	singleton.initSdkWithEncryptedToken(clientId, encryptedToken, enableLog, withIAP, withAchievement, enableAchievementToast)
+	singleton.initSdkWithEncryptedToken(clientId, encryptedToken, enableLog, withIAP, withAchievement)
 #endregion
 
 #region 登录功能
@@ -546,7 +545,7 @@ func restartApp():
 #endregion
 
 #region 便利方法
-func initAndVerifyLicense(clientId: String, clientToken: String, enableLog: bool = false, withIAP: bool = false, withAchievement: bool = false, enableAchievementToast: bool = true):
+func initAndVerifyLicense(clientId: String, clientToken: String, enableLog: bool = false, withIAP: bool = false, withAchievement: bool = false):
 	# 便利方法：初始化SDK并立即进行正版验证
 	#
 	# 这是一个封装了SDK初始化和正版验证的便利方法，适合在游戏启动时使用
@@ -557,13 +556,12 @@ func initAndVerifyLicense(clientId: String, clientToken: String, enableLog: bool
 	#   enableLog: 是否启用日志
 	#   withIAP: 是否启用内购功能
 	#   withAchievement: 是否启用成就系统
-	#   enableAchievementToast: 成就达成时是否展示气泡弹窗提示
-	initSdk(clientId, clientToken, enableLog, withIAP, withAchievement, enableAchievementToast)
+	initSdk(clientId, clientToken, enableLog, withIAP, withAchievement)
 	# 等待一帧确保SDK初始化完成
 	yield(get_tree(), "idle_frame")
 	checkLicense(false)
 
-func initWithEncryptedTokenAndVerifyLicense(clientId: String, encryptedToken: String, enableLog: bool = false, withIAP: bool = false, withAchievement: bool = false, enableAchievementToast: bool = true):
+func initWithEncryptedTokenAndVerifyLicense(clientId: String, encryptedToken: String, enableLog: bool = false, withIAP: bool = false, withAchievement: bool = false):
 	# 便利方法：使用加密token初始化SDK并立即进行正版验证
 	#
 	# Args:
@@ -572,8 +570,7 @@ func initWithEncryptedTokenAndVerifyLicense(clientId: String, encryptedToken: St
 	#   enableLog: 是否启用日志
 	#   withIAP: 是否启用内购功能
 	#   withAchievement: 是否启用成就系统
-	#   enableAchievementToast: 成就达成时是否展示气泡弹窗提示
-	initSdkWithEncryptedToken(clientId, encryptedToken, enableLog, withIAP, withAchievement, enableAchievementToast)
+	initSdkWithEncryptedToken(clientId, encryptedToken, enableLog, withIAP, withAchievement)
 	# 等待一帧确保SDK初始化完成
 	yield(get_tree(), "idle_frame")
 	checkLicense(false)
@@ -1095,14 +1092,14 @@ func getArchiveCover(archiveUuid: String, archiveFileId: String) -> void:
 #region 成就系统功能
 
 func initAchievement(enableToast: bool = true) -> void:
-	# 初始化成就系统
+	# 设置成就达成时是否展示气泡弹窗
 	#
-	# 必须在 initSdk() 之后调用。成就模块依赖 TapTap 登录。
+	# 注意：成就系统必须在 initSdk(withAchievement=true) 时启用。
+	# 此方法可在初始化后调用以修改 toast 显示状态。
 	#
 	# Args:
 	#   enableToast: 成就达成时是否展示气泡弹窗提示（默认 true）
-	if not singleton: return
-	singleton.initAchievement(enableToast)
+	setAchievementToastEnabled(enableToast)
 
 func unlockAchievement(achievementId: String) -> void:
 	# 解锁指定成就

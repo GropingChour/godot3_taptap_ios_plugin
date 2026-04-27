@@ -44,7 +44,7 @@ typedef PoolStringArray GodotStringArray;
 
 - (NSString *)getDecryptKey;
 - (NSString *)decryptToken:(NSString *)encryptedToken;
-- (void)initSDKWithClientId:(NSString *)clientId clientToken:(NSString *)clientToken enableLog:(BOOL)enableLog withAchievement:(BOOL)withAchievement enableAchievementToast:(BOOL)enableAchievementToast;
+- (void)initSDKWithClientId:(NSString *)clientId clientToken:(NSString *)clientToken enableLog:(BOOL)enableLog withAchievement:(BOOL)withAchievement;
 - (void)loginWithProfile:(BOOL)useProfile friends:(BOOL)useFriends;
 - (BOOL)isLoggedIn;
 - (NSDictionary *)getUserProfile;
@@ -62,9 +62,8 @@ typedef PoolStringArray GodotStringArray;
 - (void)getArchiveCoverUUID:(NSString *)archiveUUID fileID:(NSString *)fileID;
 
 // Achievement
-- (void)initAchievementWithEnableToast:(BOOL)enableToast;
 - (void)unlockAchievementWithId:(NSString *)achievementId;
-- (void)incrementAchievementWithId:(NSString *)achievementId step:(NSInteger)step;
+- (void)incrementAchievementWithId:(NSString *)achievementId steps:(NSInteger)steps;
 - (void)showAchievements;
 - (void)setAchievementToastEnabled:(BOOL)enabled;
 
@@ -79,7 +78,7 @@ typedef PoolStringArray GodotStringArray;
 		[TapTapCompliance registerComplianceDelegate:self];
 		[TapTapCloudSave ensureInitialization];
 		[TapTapCloudSave registerCloudSaveCallback:self];
-		[TapTapAchievement registerCallBack:self];
+		[TapTapAchievement registerCallbackWithCallback:self];
 	}
 	return self;
 }
@@ -112,7 +111,7 @@ typedef PoolStringArray GodotStringArray;
 	return [[NSString alloc] initWithData:decryptedData encoding:NSUTF8StringEncoding] ?: @"";
 }
 
-- (void)initSDKWithClientId:(NSString *)clientId clientToken:(NSString *)clientToken enableLog:(BOOL)enableLog withAchievement:(BOOL)withAchievement enableAchievementToast:(BOOL)enableAchievementToast {
+- (void)initSDKWithClientId:(NSString *)clientId clientToken:(NSString *)clientToken enableLog:(BOOL)enableLog withAchievement:(BOOL)withAchievement {
 	// dispatch_async(dispatch_get_main_queue(), ^{
 
 	// NSLog(@"[TapTap] SDK init with clientId: %@, clientToken: %@", clientId, clientToken);
@@ -150,9 +149,9 @@ typedef PoolStringArray GodotStringArray;
 	// 成就系统配置
 	if (withAchievement) {
 		TapTapAchievementOptions *achievementOptions = [[TapTapAchievementOptions alloc] init];
-		achievementOptions.enableToast = enableAchievementToast;
+		achievementOptions.enableToast = YES;
 		[otherOptions addObject:achievementOptions];
-		NSLog(@"[TapTap] Achievement enabled, toast=%d", enableAchievementToast);
+		NSLog(@"[TapTap] Achievement enabled");
 	}
 
 	// TapSDK 初始化
@@ -251,13 +250,6 @@ typedef PoolStringArray GodotStringArray;
 
 // MARK: - Achievement methods
 
-- (void)initAchievementWithEnableToast:(BOOL)enableToast {
-	TapTapAchievementOptions *achievementOptions = [[TapTapAchievementOptions alloc] init];
-	achievementOptions.enableToast = enableToast;
-	[TapTapSDK initWithOtherOptions:@[ achievementOptions ]];
-	NSLog(@"[TapTap] Achievement initialized, enableToast=%d", enableToast);
-}
-
 - (void)unlockAchievementWithId:(NSString *)achievementId {
 	NSLog(@"[TapTap Achievement] unlock: %@", achievementId);
 	dispatch_async(dispatch_get_main_queue(), ^{
@@ -265,10 +257,10 @@ typedef PoolStringArray GodotStringArray;
 	});
 }
 
-- (void)incrementAchievementWithId:(NSString *)achievementId step:(NSInteger)step {
-	NSLog(@"[TapTap Achievement] increment: %@, step: %ld", achievementId, (long)step);
+- (void)incrementAchievementWithId:(NSString *)achievementId steps:(NSInteger)steps {
+	NSLog(@"[TapTap Achievement] increment: %@, steps: %ld", achievementId, (long)steps);
 	dispatch_async(dispatch_get_main_queue(), ^{
-		[TapTapAchievement incrementWithAchievementId:achievementId step:(int32_t)step];
+		[TapTapAchievement incrementWithAchievementId:achievementId steps:steps];
 	});
 }
 
@@ -281,12 +273,12 @@ typedef PoolStringArray GodotStringArray;
 
 - (void)setAchievementToastEnabled:(BOOL)enabled {
 	NSLog(@"[TapTap Achievement] setToastEnabled: %d", enabled);
-	[TapTapAchievement setToastEnable:enabled];
+	[TapTapAchievement setToastEnableWithEnable:enabled];
 }
 
 // MARK: - TapTapAchievementCallback
 
-- (void)onAchievementSuccessWithCode:(int32_t)code result:(TapTapAchievementResult *)result {
+- (void)onAchievementSuccessWithCode:(NSInteger)code result:(TapTapAchievementResult *)result {
 	NSLog(@"[TapTap Achievement] onSuccess: code=%d, achievementId=%@", code, result.achievementId);
 	NSMutableDictionary *dict = [NSMutableDictionary dictionary];
 	dict[@"code"] = @(code);
@@ -299,12 +291,12 @@ typedef PoolStringArray GodotStringArray;
 	Godot3TapTap::get_singleton()->emit_signal("onAchievementSuccess", String::utf8(json.UTF8String));
 }
 
-- (void)onAchievementFailureWithAchievementId:(NSString *)achievementId errorCode:(int32_t)errorCode errorMessage:(NSString *)errorMessage {
-	NSLog(@"[TapTap Achievement] onFailure: achievementId=%@, code=%d, msg=%@", achievementId, errorCode, errorMessage);
+- (void)onAchievementFailureWithAchievementId:(NSString *)achievementId errorCode:(NSInteger)errorCode errorMsg:(NSString *)errorMsg {
+	NSLog(@"[TapTap Achievement] onFailure: achievementId=%@, code=%ld, msg=%@", achievementId, (long)errorCode, errorMsg);
 	NSMutableDictionary *dict = [NSMutableDictionary dictionary];
 	dict[@"achievementId"] = achievementId ?: @"";
 	dict[@"errorCode"] = @(errorCode);
-	dict[@"errorMessage"] = errorMessage ?: @"";
+	dict[@"errorMessage"] = errorMsg ?: @"";
 	NSData *jsonData = [NSJSONSerialization dataWithJSONObject:dict options:0 error:nil];
 	NSString *json = jsonData ? [[NSString alloc] initWithData:jsonData encoding:NSUTF8StringEncoding] : @"{}";
 	Godot3TapTap::get_singleton()->emit_signal("onAchievementFailure", String::utf8(json.UTF8String));
@@ -1066,7 +1058,6 @@ void Godot3TapTap::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("getArchiveCover"), &Godot3TapTap::getArchiveCover);
 
 	// 成就系统
-	ClassDB::bind_method(D_METHOD("initAchievement"), &Godot3TapTap::initAchievement);
 	ClassDB::bind_method(D_METHOD("unlockAchievement"), &Godot3TapTap::unlockAchievement);
 	ClassDB::bind_method(D_METHOD("incrementAchievement"), &Godot3TapTap::incrementAchievement);
 	ClassDB::bind_method(D_METHOD("showAchievements"), &Godot3TapTap::showAchievements);
@@ -1108,19 +1099,19 @@ void Godot3TapTap::_bind_methods() {
 }
 
 // SDK 初始化
-void Godot3TapTap::initSdk(const String &p_client_id, const String &p_client_token, bool p_enable_log, bool p_with_iap, bool p_with_achievement, bool p_enable_achievement_toast) {
+void Godot3TapTap::initSdk(const String &p_client_id, const String &p_client_token, bool p_enable_log, bool p_with_iap, bool p_with_achievement) {
 	NSString *clientId = [[NSString alloc] initWithUTF8String:p_client_id.utf8().get_data()];
 	NSString *clientToken = [[NSString alloc] initWithUTF8String:p_client_token.utf8().get_data()];
 
-	[taptap_delegate initSDKWithClientId:clientId clientToken:clientToken enableLog:p_enable_log withAchievement:p_with_achievement enableAchievementToast:p_enable_achievement_toast];
+	[taptap_delegate initSDKWithClientId:clientId clientToken:clientToken enableLog:p_enable_log withAchievement:p_with_achievement];
 }
 
-void Godot3TapTap::initSdkWithEncryptedToken(const String &p_client_id, const String &p_encrypted_token, bool p_enable_log, bool p_with_iap, bool p_with_achievement, bool p_enable_achievement_toast) {
+void Godot3TapTap::initSdkWithEncryptedToken(const String &p_client_id, const String &p_encrypted_token, bool p_enable_log, bool p_with_iap, bool p_with_achievement) {
 	NSString *clientId = [[NSString alloc] initWithUTF8String:p_client_id.utf8().get_data()];
 	NSString *encryptedToken = [[NSString alloc] initWithUTF8String:p_encrypted_token.utf8().get_data()];
 
 	NSString *decryptedToken = [taptap_delegate decryptToken:encryptedToken];
-	[taptap_delegate initSDKWithClientId:clientId clientToken:decryptedToken enableLog:p_enable_log withAchievement:p_with_achievement enableAchievementToast:p_enable_achievement_toast];
+	[taptap_delegate initSDKWithClientId:clientId clientToken:decryptedToken enableLog:p_enable_log withAchievement:p_with_achievement];
 }
 
 // 登录
@@ -1335,10 +1326,6 @@ void Godot3TapTap::getArchiveCover(const String &p_archive_uuid, const String &p
 
 // MARK: - Achievement C++ Implementations
 
-void Godot3TapTap::initAchievement(bool p_enable_toast) {
-	[taptap_delegate initAchievementWithEnableToast:p_enable_toast];
-}
-
 void Godot3TapTap::unlockAchievement(const String &p_achievement_id) {
 	NSString *achievementId = [[NSString alloc] initWithUTF8String:p_achievement_id.utf8().get_data()];
 	[taptap_delegate unlockAchievementWithId:achievementId];
@@ -1346,7 +1333,7 @@ void Godot3TapTap::unlockAchievement(const String &p_achievement_id) {
 
 void Godot3TapTap::incrementAchievement(const String &p_achievement_id, int p_step) {
 	NSString *achievementId = [[NSString alloc] initWithUTF8String:p_achievement_id.utf8().get_data()];
-	[taptap_delegate incrementAchievementWithId:achievementId step:p_step];
+	[taptap_delegate incrementAchievementWithId:achievementId steps:p_step];
 }
 
 void Godot3TapTap::showAchievements() {

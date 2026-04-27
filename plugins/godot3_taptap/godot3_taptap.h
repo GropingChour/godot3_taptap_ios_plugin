@@ -55,8 +55,8 @@ class Godot3TapTap : public Object {
 public:
 
 	// SDK Initialization
-	void initSdk(const String &p_client_id, const String &p_client_token, bool p_enable_log, bool p_with_iap, bool p_with_achievement = false, bool p_enable_achievement_toast = true);
-	void initSdkWithEncryptedToken(const String &p_client_id, const String &p_encrypted_token, bool p_enable_log, bool p_with_iap, bool p_with_achievement = false, bool p_enable_achievement_toast = true);
+	void initSdk(const String &p_client_id, const String &p_client_token, bool p_enable_log, bool p_with_iap, bool p_with_achievement = false);
+	void initSdkWithEncryptedToken(const String &p_client_id, const String &p_encrypted_token, bool p_enable_log, bool p_with_iap, bool p_with_achievement = false);
 	
 	// Login
 	void login(bool p_use_profile, bool p_use_friends);
@@ -95,7 +95,6 @@ public:
 	void getArchiveCover(const String &p_archive_uuid, const String &p_archive_file_id);
 
 	// Achievement
-	void initAchievement(bool p_enable_toast);
 	void unlockAchievement(const String &p_achievement_id);
 	void incrementAchievement(const String &p_achievement_id, int p_step);
 	void showAchievements();
