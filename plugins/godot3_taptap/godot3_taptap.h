@@ -55,8 +55,8 @@ class Godot3TapTap : public Object {
 public:
 
 	// SDK Initialization
-	void initSdk(const String &p_client_id, const String &p_client_token, bool p_enable_log, bool p_with_iap);
-	void initSdkWithEncryptedToken(const String &p_client_id, const String &p_encrypted_token, bool p_enable_log, bool p_with_iap);
+	void initSdk(const String &p_client_id, const String &p_client_token, bool p_enable_log, bool p_with_iap, bool p_with_achievement = false, bool p_enable_achievement_toast = true);
+	void initSdkWithEncryptedToken(const String &p_client_id, const String &p_encrypted_token, bool p_enable_log, bool p_with_iap, bool p_with_achievement = false, bool p_enable_achievement_toast = true);
 	
 	// Login
 	void login(bool p_use_profile, bool p_use_friends);
@@ -93,6 +93,13 @@ public:
 	void updateArchive(const String &p_archive_uuid, const Dictionary &p_metadata, const String &p_archive_file_path, const String &p_archive_cover_path);
 	void deleteArchive(const String &p_archive_uuid);
 	void getArchiveCover(const String &p_archive_uuid, const String &p_archive_file_id);
+
+	// Achievement
+	void initAchievement(bool p_enable_toast);
+	void unlockAchievement(const String &p_achievement_id);
+	void incrementAchievement(const String &p_achievement_id, int p_step);
+	void showAchievements();
+	void setAchievementToastEnabled(bool p_enabled);
 
 	static Godot3TapTap *get_singleton();
 

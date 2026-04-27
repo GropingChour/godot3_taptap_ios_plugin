@@ -114,6 +114,8 @@ func _ready():
 		singleton.connect("onLaunchBillingFlowResult", self, "_onLaunchBillingFlowResult")
 		# CloudSave 云存档相关信号
 		_connect_cloudsave_signal()
+		# Achievement 成就系统相关信号
+		_connect_achievement_signal()
 		
 		print(PLUGIN_NAME, " ready")
 	else:
@@ -138,8 +140,13 @@ func _connect_cloudsave_signal():
 		singleton.connect("onGetArchiveCoverFailed", self, "_onGetArchiveCoverFailed")
 #endregion
 
+func _connect_achievement_signal():
+	if singleton.has_signal("onAchievementSuccess"):
+		singleton.connect("onAchievementSuccess", self, "_onAchievementSuccess")
+		singleton.connect("onAchievementFailure", self, "_onAchievementFailure")
+
 #region SDK初始化
-func initSdk(clientId: String, clientToken: String, enableLog: bool = false, withIAP: bool = false) -> void:
+func initSdk(clientId: String, clientToken: String, enableLog: bool = false, withIAP: bool = false, withAchievement: bool = false, enableAchievementToast: bool = true) -> void:
 	# 初始化 TapTap SDK
 	#
 	# Args:
@@ -147,11 +154,13 @@ func initSdk(clientId: String, clientToken: String, enableLog: bool = false, wit
 	#   clientToken: 游戏 Client Token，从开发者中心获取
 	#   enableLog: 是否启用日志，默认为 false
 	#   withIAP: 是否启用内购功能，默认为 false
+	#   withAchievement: 是否启用成就系统，默认为 false
+	#   enableAchievementToast: 成就达成时是否展示气泡弹窗提示，默认为 true
 	if not singleton: return
-	singleton.initSdk(clientId, clientToken, enableLog, withIAP)
+	singleton.initSdk(clientId, clientToken, enableLog, withIAP, withAchievement, enableAchievementToast)
 
 # 使用加密token初始化SDK（推荐）
-func initSdkWithEncryptedToken(clientId: String, encryptedToken: String, enableLog: bool = false, withIAP: bool = false) -> void:
+func initSdkWithEncryptedToken(clientId: String, encryptedToken: String, enableLog: bool = false, withIAP: bool = false, withAchievement: bool = false, enableAchievementToast: bool = true) -> void:
 	# 使用加密的token初始化SDK，提高安全性
 	# 使用简单加密工具生成的加密token
 	#
@@ -159,8 +168,10 @@ func initSdkWithEncryptedToken(clientId: String, encryptedToken: String, enableL
 	#   encryptedToken: 通过简单加密工具生成的加密token
 	#   clientId: 游戏 Client ID，从开发者中心获取  
 	#   enableLog: 是否启用日志，默认为 false
+	#   withAchievement: 是否启用成就系统，默认为 false
+	#   enableAchievementToast: 成就达成时是否展示气泡弹窗提示，默认为 true
 	if not singleton: return
-	singleton.initSdkWithEncryptedToken(clientId, encryptedToken, enableLog, withIAP)
+	singleton.initSdkWithEncryptedToken(clientId, encryptedToken, enableLog, withIAP, withAchievement, enableAchievementToast)
 #endregion
 
 #region 登录功能
@@ -535,7 +546,7 @@ func restartApp():
 #endregion
 
 #region 便利方法
-func initAndVerifyLicense(clientId: String, clientToken: String, enableLog: bool = false, withIAP: bool = false):
+func initAndVerifyLicense(clientId: String, clientToken: String, enableLog: bool = false, withIAP: bool = false, withAchievement: bool = false, enableAchievementToast: bool = true):
 	# 便利方法：初始化SDK并立即进行正版验证
 	#
 	# 这是一个封装了SDK初始化和正版验证的便利方法，适合在游戏启动时使用
@@ -545,12 +556,14 @@ func initAndVerifyLicense(clientId: String, clientToken: String, enableLog: bool
 	#   clientToken: 游戏 Client Token  
 	#   enableLog: 是否启用日志
 	#   withIAP: 是否启用内购功能
-	initSdk(clientId, clientToken, enableLog, withIAP)
+	#   withAchievement: 是否启用成就系统
+	#   enableAchievementToast: 成就达成时是否展示气泡弹窗提示
+	initSdk(clientId, clientToken, enableLog, withIAP, withAchievement, enableAchievementToast)
 	# 等待一帧确保SDK初始化完成
 	yield(get_tree(), "idle_frame")
 	checkLicense(false)
 
-func initWithEncryptedTokenAndVerifyLicense(clientId: String, encryptedToken: String, enableLog: bool = false, withIAP: bool = false):
+func initWithEncryptedTokenAndVerifyLicense(clientId: String, encryptedToken: String, enableLog: bool = false, withIAP: bool = false, withAchievement: bool = false, enableAchievementToast: bool = true):
 	# 便利方法：使用加密token初始化SDK并立即进行正版验证
 	#
 	# Args:
@@ -558,7 +571,9 @@ func initWithEncryptedTokenAndVerifyLicense(clientId: String, encryptedToken: St
 	#   encryptedToken: 加密的 Client Token
 	#   enableLog: 是否启用日志
 	#   withIAP: 是否启用内购功能
-	initSdkWithEncryptedToken(clientId, encryptedToken, enableLog, withIAP)
+	#   withAchievement: 是否启用成就系统
+	#   enableAchievementToast: 成就达成时是否展示气泡弹窗提示
+	initSdkWithEncryptedToken(clientId, encryptedToken, enableLog, withIAP, withAchievement, enableAchievementToast)
 	# 等待一帧确保SDK初始化完成
 	yield(get_tree(), "idle_frame")
 	checkLicense(false)
@@ -1075,5 +1090,101 @@ func getArchiveCover(archiveUuid: String, archiveFileId: String) -> void:
 	#   onGetArchiveCoverFailed: 获取失败
 	if not singleton: return
 	singleton.getArchiveCover(archiveUuid, archiveFileId)
+#endregion
+
+#region 成就系统功能
+
+func initAchievement(enableToast: bool = true) -> void:
+	# 初始化成就系统
+	#
+	# 必须在 initSdk() 之后调用。成就模块依赖 TapTap 登录。
+	#
+	# Args:
+	#   enableToast: 成就达成时是否展示气泡弹窗提示（默认 true）
+	if not singleton: return
+	singleton.initAchievement(enableToast)
+
+func unlockAchievement(achievementId: String) -> void:
+	# 解锁指定成就
+	#
+	# 当玩家达成某一成就时调用。解锁结果通过回调信号返回。
+	#
+	# Args:
+	#   achievementId: 开发者中心中设定的成就 ID
+	#
+	# Triggers:
+	#   onAchievementSuccess: 解锁成功 (code=70001)
+	#   onAchievementFailure: 解锁失败
+	if not singleton: return
+	singleton.unlockAchievement(achievementId)
+
+func incrementAchievement(achievementId: String, step: int = 1) -> void:
+	# 增加分步成就的步数
+	#
+	# 适用于增量类型成就（需要多步才能解锁）。SDK 自动累计步数。
+	#
+	# Args:
+	#   achievementId: 开发者中心中设定的成就 ID
+	#   step: 增加的步数（默认 1）
+	#
+	# Triggers:
+	#   onAchievementSuccess: 增加成功 (code=70002)
+	#   onAchievementFailure: 增加失败
+	if not singleton: return
+	singleton.incrementAchievement(achievementId, step)
+
+func showAchievements() -> void:
+	# 打开成就展示页
+	#
+	# 若玩家设备上安装了 TapTap 客户端则跳转到 TapTap 客户端的成就页，
+	# 否则在游戏内展示成就页面。
+	#
+	# Triggers:
+	#   onAchievementFailure: 打开失败（achievementId 为空字符串）
+	if not singleton: return
+	singleton.showAchievements()
+
+func setAchievementToastEnabled(enabled: bool) -> void:
+	# 设置成就达成时是否显示气泡弹窗
+	#
+	# Args:
+	#   enabled: true=显示，false=不显示
+	if not singleton: return
+	singleton.setAchievementToastEnabled(enabled)
+
+#endregion
+
+#region 成就系统信号
+
+signal onAchievementSuccess(result_data)
+func _onAchievementSuccess(jsonString: String):
+	# 成就操作成功回调
+	# result_data: Dictionary
+	#   - code: int - 70001=解锁成功, 70002=增加步长成功
+	#   - achievementId: String - 成就 ID
+	#   - achievementName: String - 成就名称
+	#   - currentSteps: int - 当前步数（非分步成就为 0）
+	#   - achievementType: int - 成就类型（0=普通, 1=白金）
+	var json = JSON.parse(jsonString)
+	if json.error == OK:
+		emit_signal("onAchievementSuccess", json.result)
+	else:
+		emit_signal("onAchievementSuccess", {"error": json.error_string})
+
+signal onAchievementFailure(error_data)
+func _onAchievementFailure(jsonString: String):
+	# 成就操作失败回调
+	# error_data: Dictionary
+	#   - achievementId: String - 触发失败的成就 ID（showAchievements 时为空字符串）
+	#   - errorCode: int - 错误码
+	#     80000=未初始化, 80001=区域不支持, 80002=未登录
+	#     80010=登录失效, 80020=无效参数, 80030=网络异常, 80100=未知错误
+	#   - errorMessage: String - 错误描述
+	var json = JSON.parse(jsonString)
+	if json.error == OK:
+		emit_signal("onAchievementFailure", json.result)
+	else:
+		emit_signal("onAchievementFailure", {"error": json.error_string})
+
 #endregion
 

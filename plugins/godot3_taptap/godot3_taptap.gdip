@@ -17,7 +17,8 @@ linked=[
     "sdk/TapTapLoginSDK.xcframework",
     "sdk/TapTapComplianceSDK.xcframework",
     "sdk/TapTapCloudSaveSDK.xcframework",
-    "sdk/cloudsave_sdk.xcframework"
+    "sdk/cloudsave_sdk.xcframework",
+    "sdk/TapTapAchievementSDK.xcframework"
 ]
 embedded=[]
 system=["libz.1.tbd", "libc++.tbd"]
@@ -28,7 +29,8 @@ capabilities=[]
 
 files=[
     "sdk/TapTapLoginResource.bundle",
-    "sdk/TapTapComplianceResource.bundle"
+    "sdk/TapTapComplianceResource.bundle",
+    "sdk/TapTapAchievementResource.bundle"
 ]
 
 [plist]
