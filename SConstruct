@@ -172,6 +172,7 @@ if env['plugin'] == 'godot3_taptap':
         'plugins/godot3_taptap/sdk/THEMISLite.xcframework/' + ('ios-arm64' if not env['simulator'] else 'ios-arm64_x86_64-simulator'),
         'plugins/godot3_taptap/sdk/TapTapCloudSaveSDK.xcframework/' + ('ios-arm64' if not env['simulator'] else 'ios-arm64_x86_64-simulator'),
         'plugins/godot3_taptap/sdk/cloudsave_sdk.xcframework/' + ('ios-arm64' if not env['simulator'] else 'ios-arm64_x86_64-simulator'),
+        'plugins/godot3_taptap/sdk/TapTapAchievementSDK.xcframework/' + ('ios-arm64' if not env['simulator'] else 'ios-arm64_x86_64-simulator'),
     ]
     for framework_path in sdk_frameworks:
         env.Append(CCFLAGS=['-F', framework_path])

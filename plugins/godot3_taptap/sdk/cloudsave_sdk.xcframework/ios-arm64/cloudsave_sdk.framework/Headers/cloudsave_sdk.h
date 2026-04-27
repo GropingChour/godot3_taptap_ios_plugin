@@ -1,24 +1,27 @@
 ﻿#ifndef TAP_CLOUD_SAVE_SDK_SRC_CLOUD_SAVE_SDK_H_
 #define TAP_CLOUD_SAVE_SDK_SRC_CLOUD_SAVE_SDK_H_
 
-#if defined(_WIN32) || defined(__CYGWIN__)
-#ifdef EXPORT_TDK_CPP
-#define TAPSDK_EXPORT_API __declspec(dllexport)
-#else
-#define TAPSDK_EXPORT_API __declspec(dllimport)
-#endif
-#else
-#ifdef EXPORT_TDK_CPP
-#define TAPSDK_EXPORT_API __attribute__((visibility("default")))
-#else
-#define TAPSDK_EXPORT_API
-#endif
-#endif
+#include "export_api.h"
 
 ///////////////////////////////////////////////////////////////////////////////////////
 
 #ifdef __cplusplus
 extern "C" {
+#endif
+
+#ifdef TAPSDK_SHARED_LIB
+/**
+ * 初始化日志模块
+ */
+TAPSDK_EXPORT_API void TapSdkCloudSaveInitLogger(TapSdkCppLogWriter logWriter);
+#endif
+
+#ifdef FOR_TAP_PC
+/**
+ * 初始化日志模块
+ *   - logLevel 日志等级：1 trace、2 debug、3 info、4 warn、5 error、> 5 不打日志。建议调试时设为1，正式版设为3。
+ */
+TAPSDK_EXPORT_API void TapSdkCppInitLogger(int32_t logLevel, TapSdkCppLogWriter logWriter);
 #endif
 
 /**
@@ -29,13 +32,12 @@ extern "C" {
  *   TapSDK参数格式
  *   {
  *       "region": 2,
- *       "log_to_console": 1,
- *       "log_level": 3,
  *       "data_dir": "/tmp",
  *       "client_id": "rfciqabirt4vqav7io",
  *       "client_token": "ts426XNwSswZWE33qB1ri6OmMk1i2q4zthima6hS",
  *       "ua": "TapSDK-Android/3.28.0",
  *       "lang": "zh-CN",
+ *       "runtime_ver": "4.6.0-alpha.7",
  *       "platform": "Android",
  *       "device_id": "123456",
  *       "sdk_artifact": "Android",
@@ -49,8 +51,6 @@ extern "C" {
  *   Tap Miniapp参数格式
  *   {
  *       "region": 2,
- *       "log_to_console": 1,
- *       "log_level": 3,
  *       "data_dir": "/tmp",
  *       "client_id": "rfciqabirt4vqav7io",
  *       "client_token": "ts426XNwSswZWE33qB1ri6OmMk1i2q4zthima6hS",
@@ -64,13 +64,12 @@ extern "C" {
  *   }
  *
  *   - region 取值：0 国内、1 海外、2 RND、3 海外RND
- *   - log_to_console 是否输出到控制台：0 不输出、1 输出。
- *   - log_level 取值：1 Trace、2 Debug、3 Info、4 Warn、5 Error、6 完全不输出
- *   - data_dir 保存本地缓存和日志文件的目录，不允许为空
+ *   - data_dir 保存本地缓存的目录，不允许为空
  *   - client_id 不允许为空
  *   - client_token 不允许为空
  *   - ua user agent，不允许为空
  *   - lang 语言，允许为空
+ *   - runtime_ver 宿主版本，Tap Miniapp不允许为空，TapSDK可以为空
  *   - platform 不允许为空，TapSDK专用参数
  *   - device_id 设备ID，不允许为空，TapSDK专用参数
  *   - sdk_artifact 不允许为空，TapSDK专用参数
@@ -78,7 +77,6 @@ extern "C" {
  *   - sdk_token 登录态鉴权token，允许为空，TapSDK专用参数
  *     - kid mac_key id，不允许为空
  *     - key mac密钥，不允许为空
- *   - runtime_ver 宿主版本，不允许为空，Tap Miniapp专用参数
  *   - access_token 登录态鉴权token，允许为空，Tap Miniapp专用参数
  *     - kid mac_key id，不允许为空
  *     - key mac密钥，不允许为空
