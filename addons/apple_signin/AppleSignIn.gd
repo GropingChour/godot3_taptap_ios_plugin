@@ -77,6 +77,7 @@ signal on_credential_state(event)
 # ---------------------------------------------------------------------------
 
 func _ready() -> void:
+	pause_mode = Node.PAUSE_MODE_PROCESS
 	if Engine.has_singleton(PLUGIN_NAME):
 		_singleton = Engine.get_singleton(PLUGIN_NAME)
 		print("[AppleSignIn] native singleton ready")

@@ -9,6 +9,8 @@
 #include "core/object.h"
 #endif
 
+#include <mutex>
+
 class AppleSignIn : public Object {
 
 	GDCLASS(AppleSignIn, Object);
@@ -16,6 +18,7 @@ class AppleSignIn : public Object {
 	static AppleSignIn *instance;
 	static void _bind_methods();
 
+	static std::mutex pending_events_mutex;
 	List<Variant> pending_events;
 
 	// In-memory session state — updated when sign_in succeeds/fails and when

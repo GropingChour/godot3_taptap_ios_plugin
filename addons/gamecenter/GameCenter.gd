@@ -15,6 +15,7 @@ signal on_identity_verification_signature(event)
 #endregion
 
 func _ready():
+	pause_mode = Node.PAUSE_MODE_PROCESS
 	if Engine.has_singleton(PLUGIN_NAME):
 		singleton = Engine.get_singleton(PLUGIN_NAME)
 		print(PLUGIN_NAME + " initialized")

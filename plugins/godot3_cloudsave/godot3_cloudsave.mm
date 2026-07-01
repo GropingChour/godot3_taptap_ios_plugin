@@ -9,6 +9,7 @@
 #include <map>
 #include <mutex>
 #include <vector>
+#include <atomic>
 
 #if VERSION_MAJOR == 4
 #import "platform/ios/app_delegate.h"
@@ -943,8 +944,25 @@ void Godot3CloudSave::createArchive(String metadataJson, String archiveFilePath,
     }];
 }
 
+static std::atomic<uint64_t> s_active_archive_list_query_id{0};
+static const NSTimeInterval kArchiveListQueryTimeoutSeconds = 30.0;
+
+static bool _cs_finish_archive_list_query(uint64_t query_id) {
+	uint64_t expected = query_id;
+	return s_active_archive_list_query_id.compare_exchange_strong(expected, 0);
+}
+
 void Godot3CloudSave::getArchiveList() {
     NSLog(@"[CloudSave] getArchiveList: start");
+
+    const uint64_t query_id = ++s_active_archive_list_query_id;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(kArchiveListQueryTimeoutSeconds * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        if (!_cs_finish_archive_list_query(query_id)) {
+            return;
+        }
+        NSLog(@"[CloudSave] getArchiveList: timeout after %.0fs, returning cached/empty list", kArchiveListQueryTimeoutSeconds);
+        _cs_post_cached_or_empty_list_success_async();
+    });
 
     NSPredicate *predicate = [NSPredicate predicateWithValue:YES];
     CKQuery *query = [[CKQuery alloc] initWithRecordType:@"GameArchive" predicate:predicate];
@@ -958,11 +976,13 @@ void Godot3CloudSave::getArchiveList() {
         database = [container privateCloudDatabase];
     } @catch (NSException *exception) {
         NSLog(@"[CloudSave] getArchiveList: ERROR - CloudKit exception: %@", exception.reason);
-        Dictionary ret;
-        ret["type"] = "get_archive_list_failed";
-        ret["msg"] = String("CloudKit disabled: ") + String([exception.reason UTF8String]);
-        ret["code"] = 300002;
-        _post_event(ret);
+        if (_cs_finish_archive_list_query(query_id)) {
+            Dictionary ret;
+            ret["type"] = "get_archive_list_failed";
+            ret["msg"] = String("CloudKit disabled: ") + String([exception.reason UTF8String]);
+            ret["code"] = 300002;
+            _post_event(ret);
+        }
         return;
     }
 
@@ -974,7 +994,9 @@ void Godot3CloudSave::getArchiveList() {
             // Treat this as an empty list rather than a failure.
             if (error.code == 11) {
                 NSLog(@"[CloudSave] getArchiveList: record type 'GameArchive' not found in schema - treating as empty list (first run)");
-                _cs_post_cached_or_empty_list_success_async();
+                if (_cs_finish_archive_list_query(query_id)) {
+                    _cs_post_cached_or_empty_list_success_async();
+                }
                 return;
             }
             // CKErrorServerRejectedRequest (code=12) with "recordName is not marked queryable"
@@ -996,7 +1018,12 @@ void Godot3CloudSave::getArchiveList() {
                               (long)operationError.code, operationError.domain, operationError.localizedDescription);
                         if (operationError.code == 12 && [operationError.localizedDescription rangeOfString:@"recordName" options:NSCaseInsensitiveSearch].location != NSNotFound) {
                             NSLog(@"[CloudSave] getArchiveList: fallback still blocked by CloudKit index config, treating as empty list to avoid blocking app flow");
-                            _cs_post_cached_or_empty_list_success_async();
+                            if (_cs_finish_archive_list_query(query_id)) {
+                                _cs_post_cached_or_empty_list_success_async();
+                            }
+                            return;
+                        }
+                        if (!_cs_finish_archive_list_query(query_id)) {
                             return;
                         }
                         Dictionary fallbackRet;
@@ -1007,12 +1034,18 @@ void Godot3CloudSave::getArchiveList() {
                         return;
                     }
 
+                    if (!_cs_finish_archive_list_query(query_id)) {
+                        return;
+                    }
                     NSLog(@"[CloudSave] getArchiveList: fallback SUCCESS - found %lu CK records",
                           (unsigned long)fetchedRecords.count);
                     _cs_post_archive_list_success_async(fetchedRecords);
                 };
 
                 [database addOperation:op];
+                return;
+            }
+            if (!_cs_finish_archive_list_query(query_id)) {
                 return;
             }
             Dictionary ret;
@@ -1023,6 +1056,9 @@ void Godot3CloudSave::getArchiveList() {
             return;
         }
 
+        if (!_cs_finish_archive_list_query(query_id)) {
+            return;
+        }
         NSLog(@"[CloudSave] getArchiveList: raw query SUCCESS - found %lu records from CloudKit",
               (unsigned long)results.count);
         _cs_post_archive_list_success_async(results);

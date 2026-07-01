@@ -53,7 +53,98 @@ typedef PoolRealArray GodotFloatArray;
 #endif
 
 GameCenter *GameCenter::instance = NULL;
+std::mutex GameCenter::pending_events_mutex;
 GodotGameCenterDelegate *gameCenterDelegate = nil;
+
+static UIViewController *_gc_resolve_root_view_controller() {
+	UIViewController *root_controller = nil;
+
+	if (@available(iOS 13.0, *)) {
+		for (UIScene *scene in [UIApplication sharedApplication].connectedScenes) {
+			if (scene.activationState == UISceneActivationStateBackground) {
+				continue;
+			}
+			if (![scene isKindOfClass:[UIWindowScene class]]) {
+				continue;
+			}
+			UIWindowScene *windowScene = (UIWindowScene *)scene;
+			for (UIWindow *window in windowScene.windows) {
+				if (window.isKeyWindow && window.rootViewController) {
+					return window.rootViewController;
+				}
+			}
+			for (UIWindow *window in windowScene.windows) {
+				if (window.rootViewController) {
+					return window.rootViewController;
+				}
+			}
+		}
+	}
+
+	if ([UIApplication sharedApplication].delegate.window.rootViewController) {
+		return [UIApplication sharedApplication].delegate.window.rootViewController;
+	}
+	if ([UIApplication sharedApplication].keyWindow.rootViewController) {
+		return [UIApplication sharedApplication].keyWindow.rootViewController;
+	}
+	for (UIWindow *window in [UIApplication sharedApplication].windows) {
+		if (window.rootViewController) {
+			return window.rootViewController;
+		}
+	}
+	return root_controller;
+}
+
+static void _gc_present_on_next_main_tick(UIViewController *controller) {
+	if (!controller) {
+		return;
+	}
+	dispatch_async(dispatch_get_main_queue(), ^{
+		UIViewController *root_controller = _gc_resolve_root_view_controller();
+		if (!root_controller) {
+			NSLog(@"[GameCenter] authenticate: no root view controller, skipping presentation");
+			return;
+		}
+		if (root_controller.presentedViewController) {
+			NSLog(@"[GameCenter] authenticate: root already presenting, deferring GC sheet");
+			dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+				UIViewController *retry_root = _gc_resolve_root_view_controller();
+				if (retry_root && !retry_root.presentedViewController) {
+					[retry_root presentViewController:controller animated:YES completion:nil];
+				}
+			});
+			return;
+		}
+		[root_controller presentViewController:controller animated:YES completion:nil];
+	});
+}
+
+static void _gc_post_auth_result(GKLocalPlayer *player, NSError *error) {
+	dispatch_async(dispatch_get_main_queue(), ^{
+		Dictionary ret;
+		ret["type"] = "authentication";
+		if (player.isAuthenticated) {
+			ret["result"] = "ok";
+			ret["alias"] = [player.alias UTF8String];
+			ret["displayName"] = [player.displayName UTF8String];
+
+			if (@available(iOS 13, *)) {
+				ret["player_id"] = [player.teamPlayerID UTF8String];
+			} else {
+				ret["player_id"] = [player.playerID UTF8String];
+			}
+
+			GameCenter::get_singleton()->authenticated = true;
+		} else {
+			ret["result"] = "error";
+			ret["error_code"] = error ? (int64_t)error.code : (int64_t)-1;
+			ret["error_description"] = error ? [error.localizedDescription UTF8String] : "Game Center authentication failed";
+			GameCenter::get_singleton()->authenticated = false;
+		}
+
+		GameCenter::get_singleton()->_post_event(ret);
+	});
+}
 
 void GameCenter::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("authenticate"), &GameCenter::authenticate);
@@ -80,45 +171,24 @@ Error GameCenter::authenticate() {
 	GKLocalPlayer *player = [GKLocalPlayer localPlayer];
 	ERR_FAIL_COND_V(![player respondsToSelector:@selector(authenticateHandler)], ERR_UNAVAILABLE);
 
-	UIViewController *root_controller = [[UIApplication sharedApplication] delegate].window.rootViewController;
-	ERR_FAIL_COND_V(!root_controller, FAILED);
+	if (!_gc_resolve_root_view_controller()) {
+		NSLog(@"[GameCenter] authenticate: root view controller not ready yet");
+	}
 
 	// This handler is called several times.  First when the view needs to be shown, then again
 	// after the view is cancelled or the user logs in.  Or if the user's already logged in, it's
 	// called just once to confirm they're authenticated.  This is why no result needs to be specified
 	// in the presentViewController phase. In this case, more calls to this function will follow.
-	_weakify(root_controller);
 	_weakify(player);
 	player.authenticateHandler = (^(UIViewController *controller, NSError *error) {
-		_strongify(root_controller);
 		_strongify(player);
 
 		if (controller) {
-			[root_controller presentViewController:controller animated:YES completion:nil];
-		} else {
-			Dictionary ret;
-			ret["type"] = "authentication";
-			if (player.isAuthenticated) {
-				ret["result"] = "ok";
-				ret["alias"] = [player.alias UTF8String];
-				ret["displayName"] = [player.displayName UTF8String];
+			_gc_present_on_next_main_tick(controller);
+			return;
+		}
 
-				if (@available(iOS 13, *)) {
-					ret["player_id"] = [player.teamPlayerID UTF8String];
-				} else {
-					ret["player_id"] = [player.playerID UTF8String];
-				}
-
-				GameCenter::get_singleton()->authenticated = true;
-			} else {
-				ret["result"] = "error";
-				ret["error_code"] = (int64_t)error.code;
-				ret["error_description"] = [error.localizedDescription UTF8String];
-				GameCenter::get_singleton()->authenticated = false;
-			};
-
-			pending_events.push_back(ret);
-		};
+		_gc_post_auth_result(player, error);
 	});
 
 	return OK;
@@ -151,7 +221,9 @@ Error GameCenter::post_score(Dictionary p_score) {
 					ret["error_description"] = [error.localizedDescription UTF8String];
 				};
 
-				pending_events.push_back(ret);
+				if (GameCenter::get_singleton()) {
+			GameCenter::get_singleton()->_post_event(ret);
+		}
 			}];
 
 	return OK;
@@ -185,7 +257,9 @@ Error GameCenter::award_achievement(Dictionary p_params) {
 						ret["error_code"] = (int64_t)error.code;
 					};
 
-					pending_events.push_back(ret);
+					if (GameCenter::get_singleton()) {
+			GameCenter::get_singleton()->_post_event(ret);
+		}
 				}];
 
 	return OK;
@@ -241,7 +315,9 @@ void GameCenter::request_achievement_descriptions() {
 			ret["error_code"] = (int64_t)error.code;
 		};
 
-		pending_events.push_back(ret);
+		if (GameCenter::get_singleton()) {
+			GameCenter::get_singleton()->_post_event(ret);
+		}
 	}];
 };
 
@@ -271,7 +347,9 @@ void GameCenter::request_achievements() {
 			ret["error_code"] = (int64_t)error.code;
 		};
 
-		pending_events.push_back(ret);
+		if (GameCenter::get_singleton()) {
+			GameCenter::get_singleton()->_post_event(ret);
+		}
 	}];
 };
 
@@ -286,7 +364,9 @@ void GameCenter::reset_achievements() {
 			ret["error_code"] = (int64_t)error.code;
 		};
 
-		pending_events.push_back(ret);
+		if (GameCenter::get_singleton()) {
+			GameCenter::get_singleton()->_post_event(ret);
+		}
 	}];
 };
 
@@ -312,9 +392,6 @@ Error GameCenter::show_game_center(Dictionary p_params) {
 	GKGameCenterViewController *controller = [[GKGameCenterViewController alloc] init];
 	ERR_FAIL_COND_V(!controller, FAILED);
 
-	UIViewController *root_controller = [[UIApplication sharedApplication] delegate].window.rootViewController;
-	ERR_FAIL_COND_V(!root_controller, FAILED);
-
 	controller.gameCenterDelegate = gameCenterDelegate;
 	controller.viewState = view_state;
 	if (view_state == GKGameCenterViewControllerStateLeaderboards) {
@@ -326,7 +403,7 @@ Error GameCenter::show_game_center(Dictionary p_params) {
 		}
 	}
 
-	[root_controller presentViewController:controller animated:YES completion:nil];
+	_gc_present_on_next_main_tick(controller);
 
 	return OK;
 };
@@ -355,7 +432,9 @@ Error GameCenter::request_identity_verification_signature() {
 			ret["error_description"] = [error.localizedDescription UTF8String];
 		};
 
-		pending_events.push_back(ret);
+		if (GameCenter::get_singleton()) {
+			GameCenter::get_singleton()->_post_event(ret);
+		}
 	};
 
 	if (@available(iOS 13.5, *)) {
@@ -371,14 +450,24 @@ void GameCenter::game_center_closed() {
 	Dictionary ret;
 	ret["type"] = "show_game_center";
 	ret["result"] = "ok";
-	pending_events.push_back(ret);
+	_post_event(ret);
+}
+
+void GameCenter::_post_event(const Variant &p_event) {
+	std::lock_guard<std::mutex> lock(pending_events_mutex);
+	pending_events.push_back(p_event);
 }
 
 int GameCenter::get_pending_event_count() {
+	std::lock_guard<std::mutex> lock(pending_events_mutex);
 	return pending_events.size();
 };
 
 Variant GameCenter::pop_pending_event() {
+	std::lock_guard<std::mutex> lock(pending_events_mutex);
+	if (pending_events.empty()) {
+		return Variant();
+	}
 	Variant front = pending_events.front()->get();
 	pending_events.pop_front();
 

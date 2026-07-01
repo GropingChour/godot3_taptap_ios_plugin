@@ -2,6 +2,9 @@
 
 #import <AuthenticationServices/AuthenticationServices.h>
 
+#include <atomic>
+#include <mutex>
+
 #if VERSION_MAJOR == 4
 #import "platform/ios/app_delegate.h"
 #else
@@ -149,10 +152,14 @@ API_AVAILABLE(ios(13.0))
 // ---------------------------------------------------------------------------
 
 AppleSignIn *AppleSignIn::instance = NULL;
+std::mutex AppleSignIn::pending_events_mutex;
 
 // Strong reference so the controller lives until the callbacks fire.
 static id apple_signin_delegate = nil;
 static id auth_controller = nil;
+
+static std::atomic<uint64_t> s_active_credential_check_id{0};
+static const NSTimeInterval kCredentialCheckTimeoutSeconds = 20.0;
 
 void AppleSignIn::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("sign_in", "request_email", "request_name"),
@@ -199,7 +206,7 @@ Error AppleSignIn::sign_in(bool request_email, bool request_name) {
 		ret["result"] = "error";
 		ret["error_code"] = (int64_t)-1;
 		ret["error_description"] = "Sign In with Apple requires iOS 13 or later.";
-		pending_events.push_back(ret);
+		_post_event(ret);
 		return ERR_UNAVAILABLE;
 	}
 }
@@ -211,9 +218,32 @@ void AppleSignIn::check_credential_state(String user_id) {
 		ASAuthorizationAppleIDProvider *provider =
 		    [[ASAuthorizationAppleIDProvider alloc] init];
 
+		const uint64_t check_id = ++s_active_credential_check_id;
+		dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(kCredentialCheckTimeoutSeconds * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+			uint64_t expected = check_id;
+			if (!s_active_credential_check_id.compare_exchange_strong(expected, 0)) {
+				return;
+			}
+			NSLog(@"[AppleSignIn] check_credential_state: timeout after %.0fs", kCredentialCheckTimeoutSeconds);
+			Dictionary ret;
+			ret["type"] = "credential_state";
+			ret["user"] = [uid UTF8String];
+			ret["result"] = "error";
+			ret["error_code"] = (int64_t)-2;
+			ret["error_description"] = "Credential state check timed out";
+			if (AppleSignIn::get_singleton()) {
+				AppleSignIn::get_singleton()->_post_event(ret);
+			}
+		});
+
 		[provider getCredentialStateForUserID:uid
 		    completion:^(ASAuthorizationAppleIDProviderCredentialState state,
 		                 NSError *error) {
+			    uint64_t expected = check_id;
+			    if (!s_active_credential_check_id.compare_exchange_strong(expected, 0)) {
+				    return;
+			    }
+
 			    Dictionary ret;
 			    ret["type"] = "credential_state";
 			    ret["user"] = [uid UTF8String];
@@ -270,11 +300,12 @@ void AppleSignIn::check_credential_state(String user_id) {
 		ret["result"] = "error";
 		ret["error_code"] = (int64_t)-1;
 		ret["error_description"] = "Sign In with Apple requires iOS 13 or later.";
-		pending_events.push_back(ret);
+		_post_event(ret);
 	}
 }
 
 void AppleSignIn::_post_event(Variant p_event) {
+	std::lock_guard<std::mutex> lock(pending_events_mutex);
 	pending_events.push_back(p_event);
 }
 
@@ -287,10 +318,15 @@ String AppleSignIn::get_current_user() {
 }
 
 int AppleSignIn::get_pending_event_count() {
+	std::lock_guard<std::mutex> lock(pending_events_mutex);
 	return pending_events.size();
 }
 
 Variant AppleSignIn::pop_pending_event() {
+	std::lock_guard<std::mutex> lock(pending_events_mutex);
+	if (pending_events.empty()) {
+		return Variant();
+	}
 	Variant front = pending_events.front()->get();
 	pending_events.pop_front();
 	return front;

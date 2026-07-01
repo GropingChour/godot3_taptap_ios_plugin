@@ -39,6 +39,8 @@
 #include "core/object.h"
 #endif
 
+#include <mutex>
+
 class GameCenter : public Object {
 
 	GDCLASS(GameCenter, Object);
@@ -46,6 +48,7 @@ class GameCenter : public Object {
 	static GameCenter *instance;
 	static void _bind_methods();
 
+	static std::mutex pending_events_mutex;
 	List<Variant> pending_events;
 
 	bool authenticated;
@@ -65,6 +68,8 @@ public:
 	Error request_identity_verification_signature();
 
 	void game_center_closed();
+
+	void _post_event(const Variant &p_event);
 
 	int get_pending_event_count();
 	Variant pop_pending_event();
