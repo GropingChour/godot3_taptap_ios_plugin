@@ -54,6 +54,7 @@ class GameCenter : public Object {
 	bool authenticated;
 
 	void return_connect_error(const char *p_error_description);
+	void _complete_authentication(GKLocalPlayer *player, NSError *error);
 
 public:
 	Error authenticate();
