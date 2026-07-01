@@ -119,6 +119,38 @@ static void _gc_present_on_next_main_tick(UIViewController *controller) {
 	});
 }
 
+static void _gc_post_auth_result(GKLocalPlayer *player, NSError *error) {
+	dispatch_async(dispatch_get_main_queue(), ^{
+		GameCenter *singleton = GameCenter::get_singleton();
+		if (!singleton) {
+			return;
+		}
+
+		Dictionary ret;
+		ret["type"] = "authentication";
+		if (player.isAuthenticated) {
+			ret["result"] = "ok";
+			ret["alias"] = [player.alias UTF8String];
+			ret["displayName"] = [player.displayName UTF8String];
+
+			if (@available(iOS 13, *)) {
+				ret["player_id"] = [player.teamPlayerID UTF8String];
+			} else {
+				ret["player_id"] = [player.playerID UTF8String];
+			}
+
+			singleton->_set_authenticated(true);
+		} else {
+			ret["result"] = "error";
+			ret["error_code"] = error ? (int64_t)error.code : (int64_t)-1;
+			ret["error_description"] = error ? [error.localizedDescription UTF8String] : "Game Center authentication failed";
+			singleton->_set_authenticated(false);
+		}
+
+		singleton->_post_event(ret);
+	});
+}
+
 void GameCenter::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("authenticate"), &GameCenter::authenticate);
 	ClassDB::bind_method(D_METHOD("is_authenticated"), &GameCenter::is_authenticated);
@@ -162,38 +194,15 @@ Error GameCenter::authenticate() {
 		}
 
 		if (GameCenter::get_singleton()) {
-			GameCenter::get_singleton()->_complete_authentication(player, error);
+			_gc_post_auth_result(player, error);
 		}
 	});
 
 	return OK;
 };
 
-void GameCenter::_complete_authentication(GKLocalPlayer *player, NSError *error) {
-	dispatch_async(dispatch_get_main_queue(), ^{
-		Dictionary ret;
-		ret["type"] = "authentication";
-		if (player.isAuthenticated) {
-			ret["result"] = "ok";
-			ret["alias"] = [player.alias UTF8String];
-			ret["displayName"] = [player.displayName UTF8String];
-
-			if (@available(iOS 13, *)) {
-				ret["player_id"] = [player.teamPlayerID UTF8String];
-			} else {
-				ret["player_id"] = [player.playerID UTF8String];
-			}
-
-			authenticated = true;
-		} else {
-			ret["result"] = "error";
-			ret["error_code"] = error ? (int64_t)error.code : (int64_t)-1;
-			ret["error_description"] = error ? [error.localizedDescription UTF8String] : "Game Center authentication failed";
-			authenticated = false;
-		}
-
-		_post_event(ret);
-	});
+void GameCenter::_set_authenticated(bool p_value) {
+	authenticated = p_value;
 }
 
 bool GameCenter::is_authenticated() {

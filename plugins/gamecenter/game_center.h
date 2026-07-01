@@ -54,7 +54,6 @@ class GameCenter : public Object {
 	bool authenticated;
 
 	void return_connect_error(const char *p_error_description);
-	void _complete_authentication(GKLocalPlayer *player, NSError *error);
 
 public:
 	Error authenticate();
@@ -71,6 +70,7 @@ public:
 	void game_center_closed();
 
 	void _post_event(const Variant &p_event);
+	void _set_authenticated(bool p_value);
 
 	int get_pending_event_count();
 	Variant pop_pending_event();
