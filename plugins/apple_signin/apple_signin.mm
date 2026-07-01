@@ -56,8 +56,7 @@ API_AVAILABLE(ios(13.0))
 
 		// Update in-process session state.
 		if (AppleSignIn::get_singleton()) {
-			AppleSignIn::get_singleton()->signed_in = true;
-			AppleSignIn::get_singleton()->current_user = String::utf8(user_str ? user_str : "");
+			AppleSignIn::get_singleton()->_set_session_state(true, String::utf8(user_str ? user_str : ""));
 		}
 
 		// Email — only populated on the very first sign-in; empty string thereafter.
@@ -110,7 +109,7 @@ API_AVAILABLE(ios(13.0))
 		ret["error_description"] = "Unexpected credential type received.";
 
 		if (AppleSignIn::get_singleton()) {
-			AppleSignIn::get_singleton()->signed_in = false;
+			AppleSignIn::get_singleton()->_set_session_state(false);
 		}
 	}
 
@@ -136,8 +135,7 @@ API_AVAILABLE(ios(13.0))
 
 	// Any non-success outcome clears the in-process session state.
 	if (AppleSignIn::get_singleton()) {
-		AppleSignIn::get_singleton()->signed_in = false;
-		AppleSignIn::get_singleton()->current_user = String();
+		AppleSignIn::get_singleton()->_set_session_state(false);
 	}
 
 	if (AppleSignIn::get_singleton()) {
@@ -258,22 +256,19 @@ void AppleSignIn::check_credential_state(String user_id) {
 						    ret["result"] = "authorized";
 						    // Confirm signed-in state for this session.
 						    if (AppleSignIn::get_singleton()) {
-							    AppleSignIn::get_singleton()->signed_in = true;
-							    AppleSignIn::get_singleton()->current_user = String::utf8([uid UTF8String]);
+							    AppleSignIn::get_singleton()->_set_session_state(true, String::utf8([uid UTF8String]));
 						    }
 						    break;
 					    case ASAuthorizationAppleIDProviderCredentialRevoked:
 						    ret["result"] = "revoked";
 						    if (AppleSignIn::get_singleton()) {
-							    AppleSignIn::get_singleton()->signed_in = false;
-							    AppleSignIn::get_singleton()->current_user = String();
+							    AppleSignIn::get_singleton()->_set_session_state(false);
 						    }
 						    break;
 					    case ASAuthorizationAppleIDProviderCredentialNotFound:
 						    ret["result"] = "not_found";
 						    if (AppleSignIn::get_singleton()) {
-							    AppleSignIn::get_singleton()->signed_in = false;
-							    AppleSignIn::get_singleton()->current_user = String();
+							    AppleSignIn::get_singleton()->_set_session_state(false);
 						    }
 						    break;
 					    default:
@@ -307,6 +302,11 @@ void AppleSignIn::check_credential_state(String user_id) {
 void AppleSignIn::_post_event(Variant p_event) {
 	std::lock_guard<std::mutex> lock(pending_events_mutex);
 	pending_events.push_back(p_event);
+}
+
+void AppleSignIn::_set_session_state(bool p_signed_in, const String &p_user) {
+	signed_in = p_signed_in;
+	current_user = p_user;
 }
 
 bool AppleSignIn::is_signed_in() {

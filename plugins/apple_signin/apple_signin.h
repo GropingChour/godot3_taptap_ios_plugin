@@ -48,6 +48,7 @@ public:
 	String get_current_user();
 
 	void _post_event(Variant p_event);
+	void _set_session_state(bool p_signed_in, const String &p_user = String());
 
 	int get_pending_event_count();
 	Variant pop_pending_event();
