@@ -194,6 +194,7 @@ static const uint32_t kCSZipEOCDSig = 0x06054b50U;
 @end
 
 Godot3CloudSave *Godot3CloudSave::instance = NULL;
+std::mutex Godot3CloudSave::pending_events_mutex;
 
 // MARK: - Recent write cache
 
@@ -353,14 +354,20 @@ Godot3CloudSave *Godot3CloudSave::get_singleton() {
 }
 
 void Godot3CloudSave::_post_event(Variant p_event) {
+    std::lock_guard<std::mutex> lock(pending_events_mutex);
     pending_events.push_back(p_event);
 }
 
 int Godot3CloudSave::get_pending_event_count() {
+    std::lock_guard<std::mutex> lock(pending_events_mutex);
     return pending_events.size();
 }
 
 Variant Godot3CloudSave::pop_pending_event() {
+    std::lock_guard<std::mutex> lock(pending_events_mutex);
+    if (pending_events.empty()) {
+        return Variant();
+    }
     Variant front = pending_events.front()->get();
     pending_events.pop_front();
     return front;
@@ -388,8 +395,77 @@ bool Godot3CloudSave::isAvailable() {
 
 // MARK: - Toast Queue
 
+static void _process_toast_queue();
+
 static NSMutableArray *s_toastQueue = nil;
 static BOOL s_isShowingToast = NO;
+static UIView *s_activeToastView = nil;
+
+static const CGFloat kToastMaxHeightRatio = 0.25f;
+static const CGFloat kToastMaxHeightCap = 120.0f;
+static const NSInteger kToastMaxLines = 4;
+static const NSTimeInterval kToastWatchdogSeconds = 6.0;
+
+static UIWindow *_cs_resolve_host_window() {
+    UIWindow *hostWindow = nil;
+
+    if (@available(iOS 13.0, *)) {
+        for (UIScene *scene in [UIApplication sharedApplication].connectedScenes) {
+            if (scene.activationState == UISceneActivationStateBackground) {
+                continue;
+            }
+            if (![scene isKindOfClass:[UIWindowScene class]]) {
+                continue;
+            }
+            UIWindowScene *windowScene = (UIWindowScene *)scene;
+            for (UIWindow *window in windowScene.windows) {
+                if (window.isKeyWindow) {
+                    hostWindow = window;
+                    break;
+                }
+            }
+            if (!hostWindow) {
+                hostWindow = windowScene.windows.firstObject;
+            }
+            if (hostWindow) {
+                break;
+            }
+        }
+    }
+
+    if (!hostWindow) {
+        hostWindow = [UIApplication sharedApplication].keyWindow;
+    }
+    if (!hostWindow && [UIApplication sharedApplication].windows.count > 0) {
+        hostWindow = [UIApplication sharedApplication].windows.firstObject;
+    }
+    return hostWindow;
+}
+
+static void _cs_finish_toast_display(UIView *toastView) {
+    if (toastView) {
+        [toastView removeFromSuperview];
+    }
+    if (s_activeToastView == toastView) {
+        s_activeToastView = nil;
+    }
+    s_isShowingToast = NO;
+    _process_toast_queue();
+}
+
+static void _cs_schedule_toast_watchdog(UIView *toastView) {
+    __weak UIView *weakToast = toastView;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(kToastWatchdogSeconds * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        if (!s_isShowingToast) {
+            return;
+        }
+        if (s_activeToastView != nil && weakToast != nil && s_activeToastView != weakToast) {
+            return;
+        }
+        NSLog(@"[CloudSave] showTip: watchdog reset stuck toast");
+        _cs_finish_toast_display(s_activeToastView);
+    });
+}
 
 static void _process_toast_queue() {
     if (s_isShowingToast || s_toastQueue.count == 0) return;
@@ -398,51 +474,70 @@ static void _process_toast_queue() {
     NSString *message = s_toastQueue[0];
     [s_toastQueue removeObjectAtIndex:0];
 
-    // Create Toast View
+    UIWindow *hostWindow = _cs_resolve_host_window();
+    if (!hostWindow) {
+        NSLog(@"[CloudSave] showTip: no host window, dropping toast");
+        s_isShowingToast = NO;
+        _process_toast_queue();
+        return;
+    }
+
     UIView *toastView = [[UIView alloc] init];
     toastView.backgroundColor = [[UIColor blackColor] colorWithAlphaComponent:0.8];
     toastView.layer.cornerRadius = 10.0;
     toastView.clipsToBounds = YES;
     toastView.alpha = 0.0;
+    toastView.userInteractionEnabled = NO;
 
-    // Create Label
     UILabel *label = [[UILabel alloc] init];
     label.text = message;
     label.textColor = [UIColor whiteColor];
     label.textAlignment = NSTextAlignmentCenter;
     label.font = [UIFont systemFontOfSize:14.0];
-    label.numberOfLines = 0;
+    label.numberOfLines = kToastMaxLines;
+    label.lineBreakMode = NSLineBreakByTruncatingTail;
     [toastView addSubview:label];
 
-    // Layout
-    CGSize screenSize = [UIScreen mainScreen].bounds.size;
+    CGSize screenSize = hostWindow.bounds.size;
     CGFloat maxWidth = screenSize.width * 0.8;
-    CGSize textSize = [message boundingRectWithSize:CGSizeMake(maxWidth, CGFLOAT_MAX)
+    CGFloat maxToastHeight = MIN(kToastMaxHeightCap, screenSize.height * kToastMaxHeightRatio);
+    CGSize textSize = [message boundingRectWithSize:CGSizeMake(maxWidth, maxToastHeight)
                                             options:NSStringDrawingUsesLineFragmentOrigin
                                          attributes:@{ NSFontAttributeName : label.font }
                                             context:nil]
                               .size;
 
     CGFloat padding = 20.0;
-    CGFloat w = textSize.width + padding * 2;
-    CGFloat h = textSize.height + padding * 2;
-    toastView.frame = CGRectMake((screenSize.width - w) / 2, screenSize.height - 150, w, h);
-    label.frame = CGRectMake(padding, padding, textSize.width, textSize.height);
+    CGFloat w = MIN(screenSize.width - padding * 2, textSize.width + padding * 2);
+    CGFloat h = MIN(maxToastHeight, textSize.height) + padding * 2;
+    CGFloat x = (screenSize.width - w) / 2.0;
+    CGFloat y = screenSize.height - 150.0 - h;
+    if (y < 40.0) {
+        y = 40.0;
+    }
+    toastView.frame = CGRectMake(x, y, w, h);
+    label.frame = CGRectMake(padding, padding, w - padding * 2, h - padding * 2);
 
-    UIWindow *keyWindow = [UIApplication sharedApplication].keyWindow;
-    [keyWindow addSubview:toastView];
+    s_activeToastView = toastView;
+    [hostWindow addSubview:toastView];
+    _cs_schedule_toast_watchdog(toastView);
 
-    // Animate
     [UIView animateWithDuration:0.3 animations:^{
         toastView.alpha = 1.0;
     } completion:^(BOOL finished) {
+        if (!finished) {
+            NSLog(@"[CloudSave] showTip: fade-in interrupted");
+            _cs_finish_toast_display(toastView);
+            return;
+        }
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
             [UIView animateWithDuration:0.3 animations:^{
                 toastView.alpha = 0.0;
-            } completion:^(BOOL finished) {
-                [toastView removeFromSuperview];
-                s_isShowingToast = NO;
-                _process_toast_queue();
+            } completion:^(BOOL fadeOutFinished) {
+                if (!fadeOutFinished) {
+                    NSLog(@"[CloudSave] showTip: fade-out interrupted");
+                }
+                _cs_finish_toast_display(toastView);
             }];
         });
     }];
@@ -457,7 +552,6 @@ void Godot3CloudSave::showTip(String p_text) {
         [s_toastQueue addObject:message];
         _process_toast_queue();
 	});
-
 }
 
 // Helpers
@@ -645,6 +739,92 @@ static int _map_taptap_error_code(NSError *error, int default_code) {
     }
 }
 
+static dispatch_queue_t _cs_work_queue() {
+    static dispatch_queue_t queue;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        queue = dispatch_queue_create("com.godot3.cloudsave.work", DISPATCH_QUEUE_SERIAL);
+    });
+    return queue;
+}
+
+static Array _cs_merge_list_with_recent_cache(Array list) {
+    if (list.size() == 0) {
+        Array cached = _get_all_recent_writes();
+        if (cached.size() > 0) {
+            NSLog(@"[CloudSave] getArchiveList: CACHE FALLBACK - CK returned 0, returning %d cached entries", cached.size());
+            return cached;
+        }
+        NSLog(@"[CloudSave] getArchiveList: CloudKit returned 0 and cache is empty - final empty list");
+        return list;
+    }
+
+    NSLog(@"[CloudSave] getArchiveList: merging CloudKit results with cache for %d records", list.size());
+    for (int i = 0; i < list.size(); i++) {
+        Dictionary item = list[i];
+        String item_uuid = item.has("uuid") ? (String)item["uuid"] : "";
+        if (item_uuid.length() == 0) {
+            item_uuid = item.has("archiveUuid") ? (String)item["archiveUuid"] : "";
+        }
+        Dictionary cached_item;
+        if (item_uuid.length() > 0 && _get_recent_write(item_uuid, cached_item)) {
+            NSLog(@"[CloudSave] getArchiveList: CACHE OVERRIDE for uuid=%s", item_uuid.utf8().get_data());
+            list.set(i, cached_item);
+        }
+    }
+    return list;
+}
+
+static Array _cs_build_list_from_ck_records(NSArray<CKRecord *> *records) {
+    NSArray<CKRecord *> *sortedResults = [records sortedArrayUsingComparator:^NSComparisonResult(CKRecord *a, CKRecord *b) {
+        NSDate *ad = a.modificationDate ?: [NSDate distantPast];
+        NSDate *bd = b.modificationDate ?: [NSDate distantPast];
+        return [bd compare:ad];
+    }];
+    Array list;
+    for (CKRecord *record in sortedResults) {
+        list.push_back(recordToDictionary(record));
+    }
+    return _cs_merge_list_with_recent_cache(list);
+}
+
+static Dictionary _cs_make_archive_list_success_event(const Array &list) {
+    Dictionary data;
+    data["list"] = list;
+    data["archives"] = list;
+    data["count"] = list.size();
+    Dictionary ret;
+    ret["type"] = "get_archive_list_success";
+    ret["data"] = data;
+    return ret;
+}
+
+static void _cs_post_event_on_instance(const Dictionary &ret) {
+    Godot3CloudSave *plugin = Godot3CloudSave::get_singleton();
+    if (plugin) {
+        plugin->_post_event(ret);
+    }
+}
+
+static void _cs_post_archive_list_success_async(NSArray<CKRecord *> *records) {
+    NSArray<CKRecord *> *copiedRecords = records ? [records copy] : @[];
+    dispatch_async(_cs_work_queue(), ^{
+        Array list = _cs_build_list_from_ck_records(copiedRecords);
+        Dictionary ret = _cs_make_archive_list_success_event(list);
+        NSLog(@"[CloudSave] getArchiveList: final list count=%d", list.size());
+        _cs_post_event_on_instance(ret);
+    });
+}
+
+static void _cs_post_cached_or_empty_list_success_async() {
+    dispatch_async(_cs_work_queue(), ^{
+        Array cached = _get_all_recent_writes();
+        Array list = cached.size() > 0 ? cached : Array();
+        Dictionary ret = _cs_make_archive_list_success_event(list);
+        _cs_post_event_on_instance(ret);
+    });
+}
+
 void Godot3CloudSave::createArchive(String metadataJson, String archiveFilePath, String archiveCoverPath) {
     NSLog(@"[CloudSave] createArchive: start. filePath=%s coverPath=%s",
           archiveFilePath.utf8().get_data(), archiveCoverPath.utf8().get_data());
@@ -787,7 +967,6 @@ void Godot3CloudSave::getArchiveList() {
     }
 
     [database performQuery:query inZoneWithID:nil completionHandler:^(NSArray<CKRecord *> * _Nullable results, NSError * _Nullable error) {
-        Dictionary ret;
         if (error) {
             NSLog(@"[CloudSave] getArchiveList: ERROR - query failed. code=%ld domain=%@ desc=%@",
                   (long)error.code, error.domain, error.localizedDescription);
@@ -795,15 +974,7 @@ void Godot3CloudSave::getArchiveList() {
             // Treat this as an empty list rather than a failure.
             if (error.code == 11) {
                 NSLog(@"[CloudSave] getArchiveList: record type 'GameArchive' not found in schema - treating as empty list (first run)");
-                Array cached = _get_all_recent_writes();
-                Array list = cached.size() > 0 ? cached : Array();
-                Dictionary data;
-                data["list"] = list;
-                data["archives"] = list;
-                data["count"] = list.size();
-                ret["type"] = "get_archive_list_success";
-                ret["data"] = data;
-                _post_event(ret);
+                _cs_post_cached_or_empty_list_success_async();
                 return;
             }
             // CKErrorServerRejectedRequest (code=12) with "recordName is not marked queryable"
@@ -820,133 +991,41 @@ void Godot3CloudSave::getArchiveList() {
                 };
 
                 op.queryCompletionBlock = ^(CKQueryCursor * _Nullable cursor, NSError * _Nullable operationError) {
-                    Dictionary fallbackRet;
                     if (operationError) {
                         NSLog(@"[CloudSave] getArchiveList: fallback query ERROR - code=%ld domain=%@ desc=%@",
                               (long)operationError.code, operationError.domain, operationError.localizedDescription);
                         if (operationError.code == 12 && [operationError.localizedDescription rangeOfString:@"recordName" options:NSCaseInsensitiveSearch].location != NSNotFound) {
                             NSLog(@"[CloudSave] getArchiveList: fallback still blocked by CloudKit index config, treating as empty list to avoid blocking app flow");
-                            Array cached = _get_all_recent_writes();
-                            Array list = cached.size() > 0 ? cached : Array();
-                            Dictionary data;
-                            data["list"] = list;
-                            data["archives"] = list;
-                            data["count"] = list.size();
-                            fallbackRet["type"] = "get_archive_list_success";
-                            fallbackRet["data"] = data;
-                            _post_event(fallbackRet);
+                            _cs_post_cached_or_empty_list_success_async();
                             return;
                         }
+                        Dictionary fallbackRet;
                         fallbackRet["type"] = "get_archive_list_failed";
                         fallbackRet["msg"] = String([operationError.localizedDescription UTF8String]);
                         fallbackRet["code"] = _map_taptap_error_code(operationError, 300002);
-                        _post_event(fallbackRet);
+                        _cs_post_event_on_instance(fallbackRet);
                         return;
                     }
 
-                    [fetchedRecords sortUsingComparator:^NSComparisonResult(CKRecord *a, CKRecord *b) {
-                        NSDate *ad = a.modificationDate ?: [NSDate distantPast];
-                        NSDate *bd = b.modificationDate ?: [NSDate distantPast];
-                        return [bd compare:ad];
-                    }];
-
-                    Array list;
-                    for (CKRecord *record in fetchedRecords) {
-                        list.push_back(recordToDictionary(record));
-                    }
-
-                    if (list.size() == 0) {
-                        Array cached = _get_all_recent_writes();
-                        if (cached.size() > 0) {
-                            NSLog(@"[CloudSave] getArchiveList: fallback CACHE FALLBACK - CK returned 0, returning %d cached entries",
-                                  cached.size());
-                            list = cached;
-                        } else {
-                            NSLog(@"[CloudSave] getArchiveList: fallback CloudKit returned 0 and cache empty");
-                        }
-                    } else {
-                        NSLog(@"[CloudSave] getArchiveList: fallback merging CK results with cache for %d records",
-                              list.size());
-                        for (int i = 0; i < list.size(); i++) {
-                            Dictionary item = list[i];
-                            String item_uuid = item.has("uuid") ? (String)item["uuid"] : "";
-                            if (item_uuid.length() == 0) {
-                                item_uuid = item.has("archiveUuid") ? (String)item["archiveUuid"] : "";
-                            }
-                            Dictionary cached_item;
-                            if (item_uuid.length() > 0 && _get_recent_write(item_uuid, cached_item)) {
-                                NSLog(@"[CloudSave] getArchiveList: fallback CACHE OVERRIDE uuid=%s",
-                                      item_uuid.utf8().get_data());
-                                list.set(i, cached_item);
-                            }
-                        }
-                    }
-
-                    Dictionary data;
-                    data["list"] = list;
-                    data["archives"] = list;
-                    data["count"] = list.size();
-                    fallbackRet["type"] = "get_archive_list_success";
-                    fallbackRet["data"] = data;
-                    NSLog(@"[CloudSave] getArchiveList: fallback SUCCESS - found %lu CK records, final count=%d",
-                          (unsigned long)fetchedRecords.count, list.size());
-                    _post_event(fallbackRet);
+                    NSLog(@"[CloudSave] getArchiveList: fallback SUCCESS - found %lu CK records",
+                          (unsigned long)fetchedRecords.count);
+                    _cs_post_archive_list_success_async(fetchedRecords);
                 };
 
                 [database addOperation:op];
                 return;
             }
+            Dictionary ret;
             ret["type"] = "get_archive_list_failed";
             ret["msg"] = String([error.localizedDescription UTF8String]);
             ret["code"] = _map_taptap_error_code(error, 300002);
-        } else {
-            NSLog(@"[CloudSave] getArchiveList: raw query SUCCESS - found %lu records from CloudKit",
-                  (unsigned long)results.count);
-            NSArray<CKRecord *> *sortedResults = [results sortedArrayUsingComparator:^NSComparisonResult(CKRecord *a, CKRecord *b) {
-                NSDate *ad = a.modificationDate ?: [NSDate distantPast];
-                NSDate *bd = b.modificationDate ?: [NSDate distantPast];
-                return [bd compare:ad];
-            }];
-            Array list;
-            for (CKRecord *record in sortedResults) {
-                list.push_back(recordToDictionary(record));
-            }
-
-            if (list.size() == 0) {
-                Array cached = _get_all_recent_writes();
-                if (cached.size() > 0) {
-                    NSLog(@"[CloudSave] getArchiveList: CACHE FALLBACK - CloudKit returned 0, returning %d cached entries",
-                          cached.size());
-                    list = cached;
-                } else {
-                    NSLog(@"[CloudSave] getArchiveList: CloudKit returned 0 and cache is empty - final empty list");
-                }
-            } else {
-                NSLog(@"[CloudSave] getArchiveList: merging CloudKit results with cache for %d records", list.size());
-                for (int i = 0; i < list.size(); i++) {
-                    Dictionary item = list[i];
-                    String item_uuid = item.has("uuid") ? (String)item["uuid"] : "";
-                    if (item_uuid.length() == 0) {
-                        item_uuid = item.has("archiveUuid") ? (String)item["archiveUuid"] : "";
-                    }
-                    Dictionary cached_item;
-                    if (item_uuid.length() > 0 && _get_recent_write(item_uuid, cached_item)) {
-                        NSLog(@"[CloudSave] getArchiveList: CACHE OVERRIDE for uuid=%s",
-                              item_uuid.utf8().get_data());
-                        list.set(i, cached_item);
-                    }
-                }
-            }
-
-            Dictionary data;
-            data["list"] = list;
-            data["archives"] = list;
-            data["count"] = list.size();
-            NSLog(@"[CloudSave] getArchiveList: final list count=%d", list.size());
-            ret["type"] = "get_archive_list_success";
-            ret["data"] = data;
+            _cs_post_event_on_instance(ret);
+            return;
         }
-        _post_event(ret);
+
+        NSLog(@"[CloudSave] getArchiveList: raw query SUCCESS - found %lu records from CloudKit",
+              (unsigned long)results.count);
+        _cs_post_archive_list_success_async(results);
     }];
 }
 

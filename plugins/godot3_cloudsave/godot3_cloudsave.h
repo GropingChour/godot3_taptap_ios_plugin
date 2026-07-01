@@ -3,6 +3,8 @@
 
 #include "core/version.h"
 
+#include <mutex>
+
 #if VERSION_MAJOR == 4
 #include "core/object/class_db.h"
 #else
@@ -14,6 +16,7 @@ class Godot3CloudSave : public Object {
     
     static Godot3CloudSave *instance;
     List<Variant> pending_events;
+    static std::mutex pending_events_mutex;
 
 public:
     static Godot3CloudSave *get_singleton();
